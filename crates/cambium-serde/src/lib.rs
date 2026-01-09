@@ -28,10 +28,8 @@
 //! - `pickle` - Python's serialization format
 //! - `plist` - Apple Property List
 //!
-//! ## Feature groups
-//! - `text` - All text formats
-//! - `binary` - Common binary formats
-//! - `full` - All formats
+//! ## Feature group
+//! - `all` - All serde formats
 
 use cambium::{
     ConvertError, ConvertOutput, Converter, ConverterDecl, Properties, PropertyPattern, Registry,

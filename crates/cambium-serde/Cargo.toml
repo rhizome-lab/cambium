@@ -77,22 +77,10 @@ pickle = ["dep:serde-pickle"]
 # Property List - Apple's plist format
 plist = ["dep:plist"]
 
-# ============================================
-# FEATURE GROUPS
-# ============================================
-
-# Common text formats
-text = ["json", "yaml", "toml", "ron", "json5", "xml"]
-
-# Common binary formats
-binary = ["msgpack", "cbor", "bincode", "postcard"]
-
-# All formats
-full = [
-    # Text
+# All serde formats
+all = [
     "json", "yaml", "toml", "ron", "json5", "xml", "lexpr",
     "urlencoded", "qs", "csv",
-    # Binary
     "msgpack", "cbor", "bincode", "postcard", "bson",
     "flexbuffers", "bencode", "pickle", "plist",
 ]
