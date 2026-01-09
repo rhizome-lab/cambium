@@ -212,12 +212,23 @@ impl Executor for SimpleExecutor {
 ///
 /// Uses atomic operations to track memory reservations. When a permit is
 /// acquired, that memory is "reserved" and released when the permit is dropped.
-#[derive(Debug)]
 pub struct MemoryBudget {
     /// Maximum allowed memory in bytes.
     limit: usize,
     /// Currently reserved memory in bytes.
     used: AtomicUsize,
+    /// Mutex + Condvar for blocking reserve.
+    lock: std::sync::Mutex<()>,
+    cond: std::sync::Condvar,
+}
+
+impl std::fmt::Debug for MemoryBudget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MemoryBudget")
+            .field("limit", &self.limit)
+            .field("used", &self.used.load(Ordering::Relaxed))
+            .finish()
+    }
 }
 
 impl MemoryBudget {
@@ -226,6 +237,8 @@ impl MemoryBudget {
         Self {
             limit,
             used: AtomicUsize::new(0),
+            lock: std::sync::Mutex::new(()),
+            cond: std::sync::Condvar::new(),
         }
     }
 
@@ -253,6 +266,26 @@ impl MemoryBudget {
         }
     }
 
+    /// Block until memory is available, then reserve it.
+    ///
+    /// Returns `None` if the requested bytes exceed the total budget (impossible to ever fit).
+    pub fn reserve(&self, bytes: usize) -> Option<MemoryPermit<'_>> {
+        // If request exceeds total budget, it can never succeed
+        if bytes > self.limit {
+            return None;
+        }
+
+        let mut guard = self.lock.lock().unwrap();
+        loop {
+            // Try non-blocking reserve first
+            if let Some(permit) = self.try_reserve(bytes) {
+                return Some(permit);
+            }
+            // Wait for release notification
+            guard = self.cond.wait(guard).unwrap();
+        }
+    }
+
     /// Get current memory usage.
     pub fn used(&self) -> usize {
         self.used.load(Ordering::Acquire)
@@ -266,6 +299,8 @@ impl MemoryBudget {
     /// Release reserved memory (called by MemoryPermit::drop).
     fn release(&self, bytes: usize) {
         self.used.fetch_sub(bytes, Ordering::AcqRel);
+        // Notify waiters that memory is available
+        self.cond.notify_all();
     }
 }
 
@@ -425,10 +460,12 @@ impl Executor for ParallelExecutor {
         let execute_job = |job: Job| {
             let estimated = estimate_memory(job.input.len(), &job.plan);
 
-            // Try to acquire memory permit
-            let _permit = match budget.try_reserve(estimated) {
+            // Block until memory is available (backpressure)
+            // Only fails if single job exceeds total budget
+            let _permit = match budget.reserve(estimated) {
                 Some(permit) => permit,
                 None => {
+                    // Job is too large to ever fit in budget
                     return Err(ExecuteError::MemoryLimitExceeded {
                         needed: estimated,
                         limit: memory_limit,
@@ -602,7 +639,7 @@ mod tests {
     }
 
     #[test]
-    fn test_memory_budget() {
+    fn test_memory_budget_try_reserve() {
         let budget = MemoryBudget::new(100);
 
         // Can reserve within limit
@@ -612,7 +649,7 @@ mod tests {
         let permit2 = budget.try_reserve(40).expect("should succeed");
         assert_eq!(budget.used(), 80);
 
-        // Cannot exceed limit
+        // Cannot exceed limit (non-blocking)
         assert!(budget.try_reserve(30).is_none());
         assert_eq!(budget.used(), 80);
 
@@ -626,6 +663,48 @@ mod tests {
 
         drop(permit2);
         assert_eq!(budget.used(), 50);
+    }
+
+    #[test]
+    fn test_memory_budget_reserve_blocks() {
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::Duration;
+
+        let budget = Arc::new(MemoryBudget::new(100));
+
+        // Reserve most of the budget
+        let permit1 = budget.reserve(80).expect("should succeed");
+        assert_eq!(budget.used(), 80);
+
+        // Spawn thread that will block trying to reserve
+        let budget2 = Arc::clone(&budget);
+        let handle = thread::spawn(move || {
+            // This should block until permit1 is dropped
+            let _permit = budget2.reserve(50).expect("should eventually succeed");
+            budget2.used()
+        });
+
+        // Give the thread time to start and block
+        thread::sleep(Duration::from_millis(50));
+
+        // Thread should still be blocked
+        assert!(!handle.is_finished());
+
+        // Release permit1, unblocking the thread
+        drop(permit1);
+
+        // Thread should complete
+        let final_used = handle.join().expect("thread should complete");
+        assert_eq!(final_used, 50);
+    }
+
+    #[test]
+    fn test_memory_budget_reserve_impossible() {
+        let budget = MemoryBudget::new(100);
+
+        // Request exceeds total budget - should return None immediately
+        assert!(budget.reserve(150).is_none());
     }
 
     #[test]
