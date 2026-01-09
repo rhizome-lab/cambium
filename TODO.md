@@ -2,16 +2,21 @@
 
 ## Document Conversion (cambium-document)
 
-New crate for document → PDF normalization:
+Thin integration with a document IR library (separate project).
 
-- [ ] **Design ADR** - intermediate representation, format support
-- [ ] **Pure Rust core** - TXT, images → PDF via `printpdf`/`genpdf`
-- [ ] **Markdown → PDF** - via Typst (pure Rust) or Pandoc
-- [ ] **HTML → PDF** - Typst, or external (wkhtmltopdf/WeasyPrint)
-- [ ] **Office formats** - LibreOffice headless (DOCX, XLSX, ODT, etc.)
-- [ ] **PDF as input** - extract text, images via `pdf-extract`/`lopdf`
+See `docs/document-ir-spec.md` for comprehensive spec of the document IR:
+- Analysis of Pandoc's strengths/weaknesses
+- Property-bag based architecture (aligns with Cambium philosophy)
+- Layered representation (semantic, style, layout)
+- Fidelity tracking for lossy conversions
+- Embedded resource handling
 
-Typst is promising for pure Rust PDF generation with proper layout.
+**The document IR is out of Cambium's scope** - it's a standalone library project.
+
+cambium-document will:
+- [ ] Integrate with document IR library (once it exists)
+- [ ] Register format converters with Cambium registry
+- [ ] Route document conversions through Cambium's executor
 
 ## Audio Encoders (cambium-audio)
 
