@@ -218,15 +218,19 @@ fn deserialize(format: &str, data: &[u8]) -> Result<serde_json::Value, ConvertEr
             .map_err(|e| ConvertError::InvalidInput(format!("Invalid CBOR: {}", e))),
 
         #[cfg(feature = "bincode")]
-        "bincode" => bincode::deserialize(data)
-            .map_err(|e| ConvertError::InvalidInput(format!("Invalid Bincode: {}", e))),
+        "bincode" => {
+            let (value, _): (serde_json::Value, _) =
+                bincode::serde::decode_from_slice(data, bincode::config::standard())
+                    .map_err(|e| ConvertError::InvalidInput(format!("Invalid Bincode: {}", e)))?;
+            Ok(value)
+        }
 
         #[cfg(feature = "postcard")]
         "postcard" => postcard::from_bytes(data)
             .map_err(|e| ConvertError::InvalidInput(format!("Invalid Postcard: {}", e))),
 
         #[cfg(feature = "bson")]
-        "bson" => bson::from_slice(data)
+        "bson" => bson::de::deserialize_from_slice(data)
             .map_err(|e| ConvertError::InvalidInput(format!("Invalid BSON: {}", e))),
 
         #[cfg(feature = "flexbuffers")]
@@ -316,7 +320,7 @@ fn serialize(format: &str, value: &serde_json::Value) -> Result<Vec<u8>, Convert
         }
 
         #[cfg(feature = "bincode")]
-        "bincode" => bincode::serialize(value)
+        "bincode" => bincode::serde::encode_to_vec(value, bincode::config::standard())
             .map_err(|e| ConvertError::Failed(format!("Bincode serialization failed: {}", e))),
 
         #[cfg(feature = "postcard")]
@@ -324,7 +328,7 @@ fn serialize(format: &str, value: &serde_json::Value) -> Result<Vec<u8>, Convert
             .map_err(|e| ConvertError::Failed(format!("Postcard serialization failed: {}", e))),
 
         #[cfg(feature = "bson")]
-        "bson" => bson::to_vec(value)
+        "bson" => bson::ser::serialize_to_vec(value)
             .map_err(|e| ConvertError::Failed(format!("BSON serialization failed: {}", e))),
 
         #[cfg(feature = "flexbuffers")]
