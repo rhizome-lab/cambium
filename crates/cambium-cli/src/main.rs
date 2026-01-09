@@ -10,7 +10,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
 use indexmap::IndexMap;
 use indicatif::{ProgressBar, ProgressStyle};
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -921,99 +921,51 @@ fn convert_single_file(
     Ok(())
 }
 
-/// Detect format from magic bytes (file signature).
+/// Detect format from magic bytes using pure-magic.
 fn detect_format_from_magic(data: &[u8]) -> Option<String> {
-    if data.len() < 12 {
-        return None;
-    }
+    let db = magic_db::load().ok()?;
+    let mut cursor = Cursor::new(data);
+    let magic = db.best_magic(&mut cursor).ok()?;
 
-    // Image formats
-    if data.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return Some("png".into());
-    }
-    if data.starts_with(b"\xff\xd8\xff") {
-        return Some("jpg".into());
-    }
-    if data.starts_with(b"RIFF") && &data[8..12] == b"WEBP" {
-        return Some("webp".into());
-    }
-    if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
-        return Some("gif".into());
-    }
-    if data.starts_with(b"BM") {
-        return Some("bmp".into());
-    }
-    if data.starts_with(b"\x00\x00\x01\x00") {
-        return Some("ico".into());
-    }
-    if data.starts_with(b"II\x2a\x00") || data.starts_with(b"MM\x00\x2a") {
-        return Some("tiff".into());
-    }
-    if data.starts_with(b"qoif") {
-        return Some("qoi".into());
-    }
-    if data.len() >= 12
-        && &data[4..8] == b"ftyp"
-        && (&data[8..12] == b"avif" || &data[8..12] == b"avis")
-    {
-        return Some("avif".into());
-    }
-    if data.starts_with(b"\x76\x2f\x31\x01") {
-        return Some("exr".into());
-    }
-    if data.starts_with(b"#?RADIANCE") || data.starts_with(b"#?RGBE") {
-        return Some("hdr".into());
-    }
+    // Map MIME type to our format names
+    mime_to_format(magic.mime_type())
+}
 
-    // Audio formats
-    if data.starts_with(b"RIFF") && data.len() >= 12 && &data[8..12] == b"WAVE" {
-        return Some("wav".into());
+/// Map MIME type to cambium format name.
+fn mime_to_format(mime: &str) -> Option<String> {
+    match mime {
+        // Images
+        "image/png" => Some("png".into()),
+        "image/jpeg" => Some("jpg".into()),
+        "image/webp" => Some("webp".into()),
+        "image/gif" => Some("gif".into()),
+        "image/bmp" | "image/x-ms-bmp" => Some("bmp".into()),
+        "image/x-icon" | "image/vnd.microsoft.icon" => Some("ico".into()),
+        "image/tiff" => Some("tiff".into()),
+        "image/avif" => Some("avif".into()),
+        "image/x-exr" => Some("exr".into()),
+        "image/vnd.radiance" => Some("hdr".into()),
+        // Audio
+        "audio/x-wav" | "audio/wav" => Some("wav".into()),
+        "audio/flac" | "audio/x-flac" => Some("flac".into()),
+        "audio/mpeg" => Some("mp3".into()),
+        "audio/ogg" | "audio/x-vorbis+ogg" => Some("ogg".into()),
+        "audio/aac" | "audio/x-aac" => Some("aac".into()),
+        // Video
+        "video/mp4" => Some("mp4".into()),
+        "video/webm" => Some("webm".into()),
+        "video/x-matroska" => Some("mkv".into()),
+        "video/x-msvideo" => Some("avi".into()),
+        "video/quicktime" => Some("mov".into()),
+        // Data formats
+        "application/json" => Some("json".into()),
+        "application/xml" | "text/xml" => Some("xml".into()),
+        "application/x-yaml" | "text/yaml" => Some("yaml".into()),
+        "application/toml" | "text/x-toml" => Some("toml".into()),
+        "application/cbor" => Some("cbor".into()),
+        "application/msgpack" | "application/x-msgpack" => Some("msgpack".into()),
+        _ => None,
     }
-    if data.starts_with(b"fLaC") {
-        return Some("flac".into());
-    }
-    if data.starts_with(b"\xff\xfb") || data.starts_with(b"\xff\xfa") || data.starts_with(b"ID3") {
-        return Some("mp3".into());
-    }
-    if data.starts_with(b"OggS") {
-        // Could be ogg vorbis, opus, or video - assume audio
-        return Some("ogg".into());
-    }
-
-    // Video formats
-    if data.len() >= 12 && &data[4..8] == b"ftyp" {
-        let brand = &data[8..12];
-        if brand == b"isom"
-            || brand == b"mp41"
-            || brand == b"mp42"
-            || brand == b"M4V "
-            || brand == b"M4A "
-            || brand == b"qt  "
-        {
-            return Some("mp4".into());
-        }
-    }
-    if data.starts_with(b"\x1a\x45\xdf\xa3") {
-        // Could be mkv or webm - check for more specific markers
-        return Some("mkv".into());
-    }
-    if data.starts_with(b"RIFF") && data.len() >= 12 && &data[8..12] == b"AVI " {
-        return Some("avi".into());
-    }
-
-    // Serde binary formats
-    // MessagePack: 0x80-0x8f (fixmap), 0x90-0x9f (fixarray), 0xa0-0xbf (fixstr)
-    // Hard to reliably detect without more context - skip
-
-    // Text formats (check for common patterns)
-    if data.starts_with(b"{") || data.starts_with(b"[") {
-        return Some("json".into());
-    }
-    if data.starts_with(b"<?xml") || data.starts_with(b"<") {
-        return Some("xml".into());
-    }
-
-    None
 }
 
 /// Detect format from file extension.

@@ -41,6 +41,8 @@ clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 clap_mangen = "0.2"
 indicatif = "0.17"
+pure-magic = "0.1"
+magic-db = "0.3"
 anyhow = "1"
 indexmap = "2"
 image = { version = "0.25", default-features = false, optional = true }
