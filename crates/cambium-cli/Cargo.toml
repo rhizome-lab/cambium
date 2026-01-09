@@ -25,8 +25,11 @@ image-all = ["image", "cambium-image/all"]
 video-all = ["video", "cambium-video/all"]
 audio-all = ["audio", "cambium-audio/all"]
 
+# Parallel execution (batch processing)
+parallel = ["cambium/parallel"]
+
 # Everything (video excluded from default, requires FFmpeg)
-all = ["serde-all", "image-all", "video-all", "audio-all"]
+all = ["serde-all", "image-all", "video-all", "audio-all", "parallel"]
 
 [dependencies]
 cambium.workspace = true

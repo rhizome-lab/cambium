@@ -18,11 +18,16 @@ Currently only WAV encoding is supported. Adding encoders for other formats:
 
 ## Architecture
 
-See ADR-0006 for the Executor abstraction (implemented). Future work:
+See ADR-0006 for the Executor abstraction.
 
-- [ ] **BoundedExecutor** - sequential with memory tracking, fail-fast on OOM risk
-- [ ] **ParallelExecutor** - rayon + memory semaphore for batch processing
-- [ ] **StreamingExecutor** - chunk-based I/O for huge files (requires converter changes)
+Implemented:
+- [x] **SimpleExecutor** - sequential, unbounded memory
+- [x] **BoundedExecutor** - sequential with memory limit checking (fail-fast)
+- [x] **ParallelExecutor** - rayon + memory budget for batch (requires `parallel` feature)
+- [x] **MemoryBudget** - semaphore-like reservation with RAII permits
+
+Future work:
+- [ ] **StreamingExecutor** - chunk-based I/O for huge files (requires converter interface changes)
 
 ## General
 

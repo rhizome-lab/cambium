@@ -12,9 +12,11 @@ mod registry;
 mod workflow;
 
 pub use converter::{ConvertError, ConvertOutput, Converter, ConverterDecl, NamedInput, PortDecl};
+#[cfg(feature = "parallel")]
+pub use executor::ParallelExecutor;
 pub use executor::{
-    ExecuteError, ExecutionContext, ExecutionResult, ExecutionStats, Executor, Job, SimpleExecutor,
-    estimate_memory,
+    BoundedExecutor, ExecuteError, ExecutionContext, ExecutionResult, ExecutionStats, Executor,
+    Job, MemoryBudget, MemoryPermit, SimpleExecutor, estimate_memory,
 };
 pub use pattern::{Predicate, PropertyPattern};
 pub use planner::{Cardinality, Plan, PlanStep, Planner};

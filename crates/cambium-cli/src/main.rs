@@ -2,8 +2,9 @@
 
 use anyhow::{Context, Result, bail};
 use cambium::{
-    Cardinality, ConvertOutput, ExecutionContext, Executor, NamedInput, Plan, Planner, Properties,
-    PropertiesExt, PropertyPattern, Registry, SimpleExecutor, Sink, Source, Workflow,
+    BoundedExecutor, Cardinality, ConvertOutput, ExecutionContext, Executor, NamedInput, Plan,
+    Planner, Properties, PropertiesExt, PropertyPattern, Registry, SimpleExecutor, Sink, Source,
+    Workflow,
 };
 use clap::{Parser, Subcommand};
 use indexmap::IndexMap;
@@ -31,6 +32,10 @@ struct ConvertOptions {
 #[command(name = "cambium")]
 #[command(about = "Type-driven data transformation", long_about = None)]
 struct Cli {
+    /// Memory limit in bytes (e.g., 100000000 for 100MB). Fails fast if exceeded.
+    #[arg(long, global = true)]
+    memory_limit: Option<usize>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -129,6 +134,8 @@ fn main() -> Result<()> {
     #[cfg(feature = "audio")]
     cambium_audio::register_all(&mut registry);
 
+    let memory_limit = cli.memory_limit;
+
     match cli.command {
         Commands::List => cmd_list(&registry),
         Commands::Plan {
@@ -170,8 +177,9 @@ fn main() -> Result<()> {
                 watermark_margin,
                 quality,
             },
+            memory_limit,
         ),
-        Commands::Run { workflow } => cmd_run(&registry, &workflow),
+        Commands::Run { workflow } => cmd_run(&registry, &workflow, memory_limit),
     }
 }
 
@@ -354,7 +362,11 @@ fn cmd_plan_workflow(registry: &Registry, path: &str) -> Result<()> {
     Ok(())
 }
 
-fn cmd_run(registry: &Registry, workflow_path: &PathBuf) -> Result<()> {
+fn cmd_run(
+    registry: &Registry,
+    workflow_path: &PathBuf,
+    memory_limit: Option<usize>,
+) -> Result<()> {
     let data = std::fs::read(workflow_path).context("Failed to read workflow file")?;
     let workflow = Workflow::from_bytes(&data, Some(&workflow_path.to_string_lossy()))
         .map_err(|e| anyhow::anyhow!("Failed to parse workflow: {}", e))?;
@@ -430,13 +442,18 @@ fn cmd_run(registry: &Registry, workflow_path: &PathBuf) -> Result<()> {
         println!("  Running: {}", step.converter_id);
     }
 
-    // Execute using executor
-    let ctx = ExecutionContext::new(Arc::new(registry.clone()));
-    let executor = SimpleExecutor::new();
+    // Execute using appropriate executor
+    let mut ctx = ExecutionContext::new(Arc::new(registry.clone()));
+    if let Some(limit) = memory_limit {
+        ctx = ctx.with_memory_limit(limit);
+    }
 
-    let result = executor
-        .execute(&ctx, &plan, input_data, input_props)
-        .map_err(|e| anyhow::anyhow!("Execution failed: {}", e))?;
+    let result = if memory_limit.is_some() {
+        BoundedExecutor::new().execute(&ctx, &plan, input_data, input_props)
+    } else {
+        SimpleExecutor::new().execute(&ctx, &plan, input_data, input_props)
+    }
+    .map_err(|e| anyhow::anyhow!("Execution failed: {}", e))?;
 
     // Write output
     std::fs::write(&output_path, &result.data).context("Failed to write output file")?;
@@ -470,6 +487,7 @@ fn cmd_convert(
     from: Option<String>,
     to: Option<String>,
     opts: ConvertOptions,
+    memory_limit: Option<usize>,
 ) -> Result<()> {
     // Detect formats
     let source_format = from
@@ -646,13 +664,18 @@ fn cmd_convert(
             )
             .context("No conversion path found")?;
 
-        // Execute format conversion plan using executor
-        let ctx = ExecutionContext::new(Arc::new(registry.clone()));
-        let executor = SimpleExecutor::new();
+        // Execute format conversion plan using appropriate executor
+        let mut ctx = ExecutionContext::new(Arc::new(registry.clone()));
+        if let Some(limit) = memory_limit {
+            ctx = ctx.with_memory_limit(limit);
+        }
 
-        let result = executor
-            .execute(&ctx, &plan, current_data, current_props)
-            .map_err(|e| anyhow::anyhow!("Conversion failed: {}", e))?;
+        let result = if memory_limit.is_some() {
+            BoundedExecutor::new().execute(&ctx, &plan, current_data, current_props)
+        } else {
+            SimpleExecutor::new().execute(&ctx, &plan, current_data, current_props)
+        }
+        .map_err(|e| anyhow::anyhow!("Conversion failed: {}", e))?;
 
         current_data = result.data;
         current_props = result.props;
