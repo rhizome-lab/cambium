@@ -1,18 +1,168 @@
 //! Cambium CLI - type-driven data transformation
 
+mod config;
+mod errors;
+#[cfg(feature = "dew")]
+mod expr;
+
 use anyhow::{Context, Result, bail};
 use cambium::{
-    BoundedExecutor, Cardinality, ConvertOutput, ExecutionContext, Executor, NamedInput, Plan,
-    Planner, Properties, PropertiesExt, PropertyPattern, Registry, SimpleExecutor, Sink, Source,
-    Workflow,
+    BoundedExecutor, Cardinality, ConvertOutput, ExecutionContext, Executor, NamedInput,
+    OptimizeTarget, Plan, Planner, Properties, PropertiesExt, PropertyPattern, Registry,
+    SimpleExecutor, Sink, Source, Workflow,
 };
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
+use config::{Config, Preset};
 use indexmap::IndexMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::io::{Cursor, Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
+
+/// Parse --optimize argument.
+fn parse_optimize_target(s: &str) -> Result<OptimizeTarget, String> {
+    match s.to_lowercase().as_str() {
+        "quality" => Ok(OptimizeTarget::Quality),
+        "speed" => Ok(OptimizeTarget::Speed),
+        "size" => Ok(OptimizeTarget::Size),
+        _ => Err(format!(
+            "Invalid optimize target '{}'. Use: quality, speed, size",
+            s
+        )),
+    }
+}
+
+/// Collect files from patterns, directories, and globs.
+///
+/// When `recursive` is true, directories are walked recursively.
+/// When `from` is specified, only files with that extension are included.
+fn collect_files(
+    patterns: Vec<String>,
+    recursive: bool,
+    from_format: Option<&str>,
+    v: Verbosity,
+) -> Vec<String> {
+    let mut files = Vec::new();
+
+    for pattern in patterns {
+        let path = PathBuf::from(&pattern);
+
+        if path.is_dir() {
+            // Directory: walk it (recursively if requested)
+            if recursive {
+                for entry in walkdir::WalkDir::new(&path)
+                    .into_iter()
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_type().is_file())
+                {
+                    let file_path = entry.path().to_string_lossy().to_string();
+                    if should_include_file(&file_path, from_format) {
+                        files.push(file_path);
+                    }
+                }
+            } else {
+                // Non-recursive: only immediate children
+                if let Ok(entries) = std::fs::read_dir(&path) {
+                    for entry in entries.flatten() {
+                        if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                            let file_path = entry.path().to_string_lossy().to_string();
+                            if should_include_file(&file_path, from_format) {
+                                files.push(file_path);
+                            }
+                        }
+                    }
+                }
+            }
+        } else if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+            // Glob pattern
+            files.extend(expand_glob_pattern(&pattern, v));
+        } else {
+            // Regular file
+            files.push(pattern);
+        }
+    }
+
+    files.sort();
+    files
+}
+
+/// Group files by batch mode.
+///
+/// - `All`: All files in a single batch with empty name
+/// - `PerDir`: Group files by their parent directory
+fn group_by_batch_mode(files: &[String], mode: BatchMode) -> Vec<(String, Vec<String>)> {
+    match mode {
+        BatchMode::All => {
+            vec![("".to_string(), files.to_vec())]
+        }
+        BatchMode::PerDir => {
+            use std::collections::BTreeMap;
+            let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
+            for file in files {
+                let dir = PathBuf::from(file)
+                    .parent()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| ".".to_string());
+                groups.entry(dir).or_default().push(file.clone());
+            }
+
+            groups.into_iter().collect()
+        }
+    }
+}
+
+/// Check if a file should be included based on format filter.
+fn should_include_file(path: &str, from_format: Option<&str>) -> bool {
+    let Some(format) = from_format else {
+        return true;
+    };
+
+    let ext = path.rsplit('.').next().unwrap_or("");
+    // Match common format aliases
+    match (ext.to_lowercase().as_str(), format) {
+        ("jpg", "jpg") | ("jpeg", "jpg") => true,
+        ("yml", "yaml") | ("yaml", "yaml") => true,
+        (ext, format) => ext == format,
+    }
+}
+
+/// Expand a single glob pattern.
+fn expand_glob_pattern(pattern: &str, v: Verbosity) -> Vec<String> {
+    let mut files = Vec::new();
+
+    match glob::glob(pattern) {
+        Ok(paths) => {
+            for entry in paths.flatten() {
+                if entry.is_file() {
+                    files.push(entry.to_string_lossy().to_string());
+                }
+            }
+            if files.is_empty() {
+                v.info(&format!("Warning: pattern '{}' matched no files", pattern));
+            }
+        }
+        Err(e) => {
+            v.info(&format!(
+                "Warning: invalid glob pattern '{}': {}",
+                pattern, e
+            ));
+        }
+    }
+
+    files
+}
+
+/// Batch processing mode.
+#[derive(Clone, Copy, Debug, Default, clap::ValueEnum)]
+enum BatchMode {
+    /// Process all files as a single batch.
+    #[default]
+    All,
+    /// Process each directory as a separate batch.
+    PerDir,
+}
 
 /// Output verbosity level.
 #[derive(Clone, Copy)]
@@ -53,21 +203,71 @@ impl Verbosity {
 }
 
 /// Options for image/video transforms passed to converters.
-#[derive(Default)]
+///
+/// Numeric fields use `NumericValue` which can be either literals or
+/// expressions (when the `dew` feature is enabled).
+#[derive(Default, Clone)]
 struct ConvertOptions {
-    max_width: Option<u32>,
-    max_height: Option<u32>,
-    scale: Option<f64>,
+    max_width: Option<config::NumericValue>,
+    max_height: Option<config::NumericValue>,
+    scale: Option<config::NumericValue>,
     aspect: Option<String>,
     gravity: String,
     // Watermark options
     watermark: Option<PathBuf>,
     watermark_position: String,
-    watermark_opacity: f64,
-    watermark_margin: u32,
+    watermark_opacity: config::NumericValue,
+    watermark_margin: config::NumericValue,
     // Video options (reserved for future use)
     #[allow(dead_code)]
     quality: Option<String>,
+}
+
+impl ConvertOptions {
+    /// Convert Properties to variable map for expression evaluation.
+    fn props_to_vars(props: &Properties) -> std::collections::HashMap<String, f64> {
+        props
+            .iter()
+            .filter_map(|(k, v)| v.as_f64().map(|n| (k.clone(), n)))
+            .collect()
+    }
+
+    /// Evaluate max_width with given properties.
+    fn eval_max_width(&self, props: &Properties) -> Option<u32> {
+        let vars = Self::props_to_vars(props);
+        self.max_width.as_ref().and_then(|v| v.eval_u32(&vars).ok())
+    }
+
+    /// Evaluate max_height with given properties.
+    fn eval_max_height(&self, props: &Properties) -> Option<u32> {
+        let vars = Self::props_to_vars(props);
+        self.max_height
+            .as_ref()
+            .and_then(|v| v.eval_u32(&vars).ok())
+    }
+
+    /// Evaluate scale with given properties.
+    fn eval_scale(&self, props: &Properties) -> Option<f64> {
+        let vars = Self::props_to_vars(props);
+        self.scale.as_ref().and_then(|v| v.eval(&vars).ok())
+    }
+
+    /// Evaluate watermark_opacity with given properties.
+    fn eval_watermark_opacity(&self, props: &Properties) -> f64 {
+        let vars = Self::props_to_vars(props);
+        self.watermark_opacity.eval(&vars).unwrap_or(0.5)
+    }
+
+    /// Evaluate watermark_margin with given properties.
+    fn eval_watermark_margin(&self, props: &Properties) -> u32 {
+        let vars = Self::props_to_vars(props);
+        self.watermark_margin.eval_u32(&vars).unwrap_or(10)
+    }
+
+    /// Check if any resize options are set.
+    fn needs_resize(&self) -> bool {
+        self.max_width.is_some() || self.max_height.is_some() || self.scale.is_some()
+    }
 }
 
 #[derive(Parser)]
@@ -85,6 +285,10 @@ struct Cli {
     /// Quiet output (only errors)
     #[arg(short, long, global = true)]
     quiet: bool,
+
+    /// Path to config file (default: ~/.config/cambium/config.toml)
+    #[arg(long, global = true)]
+    config: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Commands,
@@ -107,6 +311,9 @@ enum Commands {
         /// Explicit target format (overrides detection)
         #[arg(long)]
         to: Option<String>,
+        /// Optimize path selection: quality (minimize loss), speed (fastest), size (smallest output)
+        #[arg(long, value_parser = parse_optimize_target)]
+        optimize: Option<OptimizeTarget>,
     },
 
     /// Convert file(s)
@@ -120,12 +327,27 @@ enum Commands {
         /// Output directory for batch conversions
         #[arg(long)]
         output_dir: Option<PathBuf>,
+        /// Recursively process directories
+        #[arg(short = 'r', long)]
+        recursive: bool,
+        /// Batch mode: 'all' processes all files together, 'per-dir' processes each directory separately
+        #[arg(long, default_value = "all")]
+        batch_mode: BatchMode,
+        /// Aggregate multiple inputs into single output (e.g., files -> tar/zip archive)
+        #[arg(long)]
+        aggregate: bool,
         /// Explicit source format (overrides detection)
         #[arg(long)]
         from: Option<String>,
         /// Explicit target format (required for batch, optional for single)
         #[arg(long)]
         to: Option<String>,
+        /// Apply a preset (web, thumbnail, social, avatar, print, lossless)
+        #[arg(long)]
+        preset: Option<String>,
+        /// Optimize path selection: quality (minimize loss), speed (fastest), size (smallest output)
+        #[arg(long, value_parser = parse_optimize_target)]
+        optimize: Option<OptimizeTarget>,
 
         // Image transform options
         /// Maximum width (fit within, preserves aspect ratio)
@@ -179,10 +401,20 @@ enum Commands {
 
     /// Generate man page
     Manpage,
+
+    /// List available presets
+    Presets,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // Load config file
+    let config = if let Some(ref path) = cli.config {
+        Config::load_from_path(Some(path.clone()))
+    } else {
+        Config::load()
+    };
 
     // Create registry with enabled converters
     let mut registry = Registry::new();
@@ -199,8 +431,11 @@ fn main() -> Result<()> {
     #[cfg(feature = "audio")]
     cambium_audio::register_all(&mut registry);
 
-    let memory_limit = cli.memory_limit;
-    let verbosity = Verbosity::from_flags(cli.verbose, cli.quiet);
+    // Apply config defaults, CLI flags override
+    let memory_limit = cli.memory_limit.or(config.defaults.memory_limit);
+    let verbose = cli.verbose || config.defaults.verbose;
+    let quiet = cli.quiet || config.defaults.quiet;
+    let verbosity = Verbosity::from_flags(verbose, quiet);
 
     match cli.command {
         Commands::List => cmd_list(&registry, verbosity),
@@ -209,13 +444,19 @@ fn main() -> Result<()> {
             output,
             from,
             to,
-        } => cmd_plan(&registry, &input, output, from, to, verbosity),
+            optimize,
+        } => cmd_plan(&registry, &input, output, from, to, optimize, verbosity),
         Commands::Convert {
             input,
             output,
             output_dir,
+            recursive,
+            batch_mode,
+            aggregate,
             from,
             to,
+            preset,
+            optimize,
             max_width,
             max_height,
             scale,
@@ -226,14 +467,11 @@ fn main() -> Result<()> {
             watermark_opacity,
             watermark_margin,
             quality,
-        } => cmd_convert(
-            &registry,
-            input,
-            output,
-            output_dir,
-            from,
-            to,
-            ConvertOptions {
+        } => {
+            // Build options from preset (if any) + CLI overrides
+            let opts = build_convert_options(
+                &config,
+                preset,
                 max_width,
                 max_height,
                 scale,
@@ -244,10 +482,42 @@ fn main() -> Result<()> {
                 watermark_opacity,
                 watermark_margin,
                 quality,
-            },
-            memory_limit,
-            verbosity,
-        ),
+            )?;
+
+            // Collect files (handles globs, directories, and recursion)
+            let collected = collect_files(input, recursive, from.as_deref(), verbosity);
+            if collected.is_empty() {
+                bail!("No input files found");
+            }
+
+            // Group files by batch mode
+            let batches = group_by_batch_mode(&collected, batch_mode);
+
+            // Auto-detect aggregation for archive formats (including compound like tar.gz)
+            let should_aggregate =
+                aggregate || to.as_deref().map_or(false, |t| is_archive_format(t));
+
+            // Process each batch
+            for (batch_name, files) in batches {
+                if !batch_name.is_empty() {
+                    verbosity.info(&format!("Processing batch: {}", batch_name));
+                }
+                cmd_convert(
+                    &registry,
+                    files,
+                    output.clone(),
+                    output_dir.clone(),
+                    from.clone(),
+                    to.clone(),
+                    opts.clone(),
+                    optimize,
+                    memory_limit,
+                    should_aggregate,
+                    verbosity,
+                )?;
+            }
+            Ok(())
+        }
         Commands::Run { workflow } => cmd_run(&registry, &workflow, memory_limit, verbosity),
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();
@@ -260,7 +530,130 @@ fn main() -> Result<()> {
             man.render(&mut std::io::stdout())?;
             Ok(())
         }
+        Commands::Presets => cmd_presets(&config, verbosity),
     }
+}
+
+/// Build ConvertOptions from preset + CLI overrides.
+#[allow(clippy::too_many_arguments)]
+fn build_convert_options(
+    config: &Config,
+    preset_name: Option<String>,
+    max_width: Option<u32>,
+    max_height: Option<u32>,
+    scale: Option<f64>,
+    aspect: Option<String>,
+    gravity: String,
+    watermark: Option<PathBuf>,
+    watermark_position: String,
+    watermark_opacity: f64,
+    watermark_margin: u32,
+    quality: Option<String>,
+) -> Result<ConvertOptions> {
+    use config::NumericValue;
+
+    // Start with preset values if specified
+    let preset = if let Some(ref name) = preset_name {
+        config.get_preset(name).ok_or_else(|| {
+            anyhow::anyhow!("Unknown preset: '{}'. Use 'cambium presets' to list.", name)
+        })?
+    } else {
+        Preset::default()
+    };
+
+    // CLI options override preset values
+    // CLI values are always literals; preset values may be expressions
+    Ok(ConvertOptions {
+        max_width: max_width.map(NumericValue::from_u32).or(preset.max_width),
+        max_height: max_height.map(NumericValue::from_u32).or(preset.max_height),
+        scale: scale.map(NumericValue::literal).or(preset.scale),
+        aspect: aspect.or(preset.aspect),
+        gravity: if gravity != "center" {
+            gravity
+        } else {
+            preset.gravity.unwrap_or_else(|| "center".into())
+        },
+        watermark: watermark.or(preset.watermark),
+        watermark_position: if watermark_position != "bottom-right" {
+            watermark_position
+        } else {
+            preset
+                .watermark_position
+                .unwrap_or_else(|| "bottom-right".into())
+        },
+        watermark_opacity: if (watermark_opacity - 0.5).abs() > f64::EPSILON {
+            NumericValue::literal(watermark_opacity)
+        } else {
+            preset
+                .watermark_opacity
+                .unwrap_or_else(|| NumericValue::literal(0.5))
+        },
+        watermark_margin: if watermark_margin != 10 {
+            NumericValue::from_u32(watermark_margin)
+        } else {
+            preset
+                .watermark_margin
+                .unwrap_or_else(|| NumericValue::from_u32(10))
+        },
+        quality: quality.or(preset.quality),
+    })
+}
+
+/// Format a NumericValue for display.
+fn format_numeric_value(v: &config::NumericValue) -> String {
+    match v {
+        config::NumericValue::Literal(n) => {
+            if n.fract() == 0.0 {
+                format!("{}", *n as i64)
+            } else {
+                format!("{}", n)
+            }
+        }
+        config::NumericValue::Expr(expr) => format!("\"{}\"", expr),
+    }
+}
+
+/// List available presets.
+fn cmd_presets(config: &Config, v: Verbosity) -> Result<()> {
+    v.info("Built-in presets:\n");
+
+    for (name, desc) in config::list_presets(config) {
+        v.info(&format!("  {:<12} {}", name, desc));
+    }
+
+    if !config.presets.is_empty() {
+        v.info("\nUser-defined presets:\n");
+        for (name, preset) in &config.presets {
+            let mut parts = Vec::new();
+            if let Some(ref w) = preset.max_width {
+                parts.push(format!("max_width={}", format_numeric_value(w)));
+            }
+            if let Some(ref h) = preset.max_height {
+                parts.push(format!("max_height={}", format_numeric_value(h)));
+            }
+            if let Some(ref a) = preset.aspect {
+                parts.push(format!("aspect={}", a));
+            }
+            if let Some(ref q) = preset.quality {
+                parts.push(format!("quality={}", q));
+            }
+            let desc = if parts.is_empty() {
+                "(empty)".into()
+            } else {
+                parts.join(", ")
+            };
+            v.info(&format!("  {:<12} {}", name, desc));
+        }
+    }
+
+    if let Some(path) = Config::default_path() {
+        v.info(&format!("\nConfig file: {}", path.display()));
+    }
+
+    #[cfg(feature = "dew")]
+    v.info("\nNote: Expression support enabled (dew feature)");
+
+    Ok(())
 }
 
 fn cmd_list(registry: &Registry, v: Verbosity) -> Result<()> {
@@ -289,11 +682,12 @@ fn cmd_plan(
     output: Option<String>,
     from: Option<String>,
     to: Option<String>,
+    optimize: Option<OptimizeTarget>,
     v: Verbosity,
 ) -> Result<()> {
     // Check if input is a workflow file
     if is_workflow_file(input) {
-        return cmd_plan_workflow(registry, input, v);
+        return cmd_plan_workflow(registry, input, optimize, v);
     }
 
     // Otherwise, plan a simple conversion
@@ -301,19 +695,31 @@ fn cmd_plan(
 
     let source_format = from
         .or_else(|| detect_format(input))
-        .context("Could not detect source format. Use --from to specify.")?;
+        .ok_or_else(|| anyhow::anyhow!("{}", errors::format_detection_error(input, true)))?;
 
     let target_format = to
         .or_else(|| detect_format(&output))
-        .context("Could not detect target format. Use --to to specify.")?;
+        .ok_or_else(|| anyhow::anyhow!("{}", errors::format_detection_error(&output, false)))?;
 
-    v.info(&format!("Planning: {} -> {}", source_format, target_format));
+    let opt_str = match optimize {
+        Some(OptimizeTarget::Quality) => " (optimize: quality)",
+        Some(OptimizeTarget::Speed) => " (optimize: speed)",
+        Some(OptimizeTarget::Size) => " (optimize: size)",
+        None => "",
+    };
+    v.info(&format!(
+        "Planning: {} -> {}{}",
+        source_format, target_format, opt_str
+    ));
     v.info("");
 
     let source_props = Properties::new().with("format", source_format.as_str());
     let target_pattern = PropertyPattern::new().eq("format", target_format.as_str());
 
-    let planner = Planner::new(registry);
+    let mut planner = Planner::new(registry);
+    if let Some(opt) = optimize {
+        planner = planner.optimize(opt);
+    }
     let plan = planner
         .plan(
             &source_props,
@@ -321,7 +727,12 @@ fn cmd_plan(
             Cardinality::One,
             Cardinality::One,
         )
-        .context("No conversion path found")?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "{}",
+                errors::no_path_error(&source_format, &target_format, registry)
+            )
+        })?;
 
     if plan.steps.is_empty() {
         v.info("Already at target format (no conversion needed)");
@@ -343,7 +754,12 @@ fn cmd_plan(
     Ok(())
 }
 
-fn cmd_plan_workflow(registry: &Registry, path: &str, v: Verbosity) -> Result<()> {
+fn cmd_plan_workflow(
+    registry: &Registry,
+    path: &str,
+    optimize: Option<OptimizeTarget>,
+    v: Verbosity,
+) -> Result<()> {
     let data = std::fs::read(path).context("Failed to read workflow file")?;
     let workflow = Workflow::from_bytes(&data, Some(path))
         .map_err(|e| anyhow::anyhow!("Failed to parse workflow: {}", e))?;
@@ -407,7 +823,10 @@ fn cmd_plan_workflow(registry: &Registry, path: &str, v: Verbosity) -> Result<()
             Cardinality::One
         };
 
-        let planner = Planner::new(registry);
+        let mut planner = Planner::new(registry);
+        if let Some(opt) = optimize {
+            planner = planner.optimize(opt);
+        }
         match planner.plan(
             &source_props,
             &target_pattern,
@@ -566,6 +985,161 @@ fn is_workflow_file(path: &str) -> bool {
     ) && std::path::Path::new(path).exists()
 }
 
+/// Check if a format is an archive format (supports aggregation).
+fn is_archive_format(format: &str) -> bool {
+    matches!(format, "tar" | "zip" | "tgz" | "tbz" | "tbz2" | "txz") || format.starts_with("tar.")
+}
+
+/// Parse a compound archive format like "tar.gz" into (archive, compression).
+///
+/// Returns: (archive_format, optional_compression)
+/// Examples:
+/// - "tar" → ("tar", None)
+/// - "tar.gz" → ("tar", Some("gz"))
+/// - "tgz" → ("tar", Some("gz"))
+/// - "tar.zst" → ("tar", Some("zst"))
+fn parse_compound_archive(format: &str) -> Result<(&str, Option<&str>)> {
+    // Handle common aliases
+    match format {
+        "tgz" => return Ok(("tar", Some("gz"))),
+        "tbz" | "tbz2" => return Ok(("tar", Some("bz2"))),
+        "txz" => return Ok(("tar", Some("xz"))),
+        _ => {}
+    }
+
+    // Check for compound formats like "tar.gz"
+    if let Some(rest) = format.strip_prefix("tar.") {
+        match rest {
+            "gz" | "gzip" => return Ok(("tar", Some("gz"))),
+            "zst" | "zstd" => return Ok(("tar", Some("zst"))),
+            "br" | "brotli" => return Ok(("tar", Some("br"))),
+            "bz2" | "bzip2" => bail!("bzip2 compression not yet supported"),
+            "xz" | "lzma" => bail!("xz/lzma compression not yet supported"),
+            _ => bail!("Unknown compression format: {}", rest),
+        }
+    }
+
+    // Simple archive format
+    match format {
+        "tar" => Ok(("tar", None)),
+        "zip" => Ok(("zip", None)),
+        _ => bail!("Unknown archive format: {}", format),
+    }
+}
+
+/// Aggregate multiple files into a single output (N→1 conversion).
+#[allow(clippy::too_many_arguments)]
+fn cmd_convert_aggregate(
+    registry: &Registry,
+    inputs: Vec<String>,
+    output: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
+    _optimize: Option<OptimizeTarget>,
+    memory_limit: Option<usize>,
+    v: Verbosity,
+) -> Result<()> {
+    use cambium::{ExecutionContext, Executor, SimpleExecutor};
+    use std::sync::Arc;
+
+    let target_format = to.context("Aggregation requires --to format")?;
+    let output_path = output.context("Aggregation requires -o/--output file")?;
+
+    v.info(&format!(
+        "Aggregating {} files to {} ({})",
+        inputs.len(),
+        output_path,
+        target_format
+    ));
+
+    // Read all input files with their properties
+    let mut input_data: Vec<(Vec<u8>, Properties)> = Vec::new();
+
+    for input_path in &inputs {
+        let data = std::fs::read(input_path)
+            .map_err(|e| anyhow::anyhow!("{}", errors::file_read_error(input_path, &e)))?;
+
+        // Detect format for this file
+        let format = from
+            .clone()
+            .or_else(|| detect_format_from_magic(&data))
+            .or_else(|| detect_format(input_path))
+            .unwrap_or_else(|| "raw".into());
+
+        // Use relative path for archive entry
+        let rel_path = PathBuf::from(input_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| input_path.clone());
+
+        let props = Properties::new()
+            .with("format", format.as_str())
+            .with("path", rel_path.as_str());
+
+        input_data.push((data, props));
+        v.debug(&format!("  Added: {} ({})", input_path, format));
+    }
+
+    // Parse compound format (e.g., "tar.gz" → archive + compression)
+    let (archive_format, compression) = parse_compound_archive(&target_format)?;
+
+    let aggregator_id = match archive_format {
+        "tar" => "archive.tar-create",
+        "zip" => "archive.zip-create",
+        _ => bail!(
+            "No aggregating converter for archive format: {}",
+            archive_format
+        ),
+    };
+
+    // Build plan: aggregate step + optional compression step
+    let mut steps = vec![cambium::PlanStep {
+        converter_id: aggregator_id.into(),
+        input_port: "in".into(),
+        output_port: "out".into(),
+        output_properties: Properties::new().with("format", archive_format),
+    }];
+
+    // Add compression step if needed
+    if let Some(comp) = compression {
+        let compressor_id = match comp {
+            "gz" | "gzip" => "compression.gzip",
+            "zst" | "zstd" => "compression.zstd",
+            "br" | "brotli" => "compression.brotli",
+            _ => bail!("Unknown compression format: {}", comp),
+        };
+        steps.push(cambium::PlanStep {
+            converter_id: compressor_id.into(),
+            input_port: "in".into(),
+            output_port: "out".into(),
+            output_properties: Properties::new().with("format", comp),
+        });
+    }
+
+    let plan = cambium::Plan { steps, cost: 1.0 };
+
+    // Execute aggregation
+    let ctx = ExecutionContext::new(Arc::new(registry.clone()))
+        .with_memory_limit(memory_limit.unwrap_or(usize::MAX));
+
+    let executor = SimpleExecutor::new();
+    let result = executor
+        .execute_aggregating(&ctx, &plan, input_data)
+        .map_err(|e| anyhow::anyhow!("Aggregation failed: {}", e))?;
+
+    // Write output
+    std::fs::write(&output_path, &result.data).context("Failed to write output")?;
+
+    v.result(&format!(
+        "Created {} ({} bytes from {} files)",
+        output_path,
+        result.data.len(),
+        inputs.len()
+    ));
+
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn cmd_convert(
     registry: &Registry,
@@ -575,9 +1149,25 @@ fn cmd_convert(
     from: Option<String>,
     to: Option<String>,
     opts: ConvertOptions,
+    optimize: Option<OptimizeTarget>,
     memory_limit: Option<usize>,
+    aggregate: bool,
     v: Verbosity,
 ) -> Result<()> {
+    // Aggregation mode: N inputs → 1 output (archive formats always use this path)
+    if aggregate {
+        return cmd_convert_aggregate(
+            registry,
+            inputs,
+            output,
+            from,
+            to,
+            optimize,
+            memory_limit,
+            v,
+        );
+    }
+
     let is_batch = inputs.len() > 1 || output_dir.is_some();
 
     if is_batch {
@@ -621,6 +1211,7 @@ fn cmd_convert(
                 from.clone(),
                 Some(target_format.clone()),
                 &opts,
+                optimize,
                 memory_limit,
                 Verbosity::Quiet, // Suppress per-file output in batch
             )?;
@@ -654,7 +1245,17 @@ fn cmd_convert(
         })
         .context("Output file required. Use -o/--output or --to to specify.")?;
 
-    convert_single_file(registry, &input, &output, from, to, &opts, memory_limit, v)
+    convert_single_file(
+        registry,
+        &input,
+        &output,
+        from,
+        to,
+        &opts,
+        optimize,
+        memory_limit,
+        v,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -665,6 +1266,7 @@ fn convert_single_file(
     from: Option<String>,
     to: Option<String>,
     opts: &ConvertOptions,
+    optimize: Option<OptimizeTarget>,
     memory_limit: Option<usize>,
     v: Verbosity,
 ) -> Result<()> {
@@ -679,14 +1281,18 @@ fn convert_single_file(
             .context("Failed to read from stdin")?;
         buf
     } else {
-        std::fs::read(input).context("Failed to read input file")?
+        std::fs::read(input)
+            .map_err(|e| anyhow::anyhow!("{}", errors::file_read_error(input, &e)))?
     };
 
     // Detect source format: --from flag > magic bytes > extension
     let source_format = from
         .or_else(|| detect_format_from_magic(&current_data))
         .or_else(|| if is_stdin { None } else { detect_format(input) })
-        .context("Could not detect source format. Use --from to specify.")?;
+        .ok_or_else(|| {
+            let path = if is_stdin { "<stdin>" } else { input };
+            anyhow::anyhow!("{}", errors::format_detection_error(path, true))
+        })?;
 
     // Detect target format: --to flag > extension (no magic for output)
     let target_format = to
@@ -697,18 +1303,20 @@ fn convert_single_file(
                 detect_format(output)
             }
         })
-        .context("Could not detect target format. Use --to to specify.")?;
+        .ok_or_else(|| {
+            let path = if is_stdout { "<stdout>" } else { output };
+            anyhow::anyhow!("{}", errors::format_detection_error(path, false))
+        })?;
 
     v.debug(&format!("Detected: {} -> {}", source_format, target_format));
     let mut current_props = Properties::new().with("format", source_format.as_str());
 
     // Apply image transforms if any options are set
-    let needs_resize =
-        opts.max_width.is_some() || opts.max_height.is_some() || opts.scale.is_some();
+    let needs_resize = opts.needs_resize();
     let needs_crop = opts.aspect.is_some();
 
     if needs_resize || needs_crop {
-        // Get image dimensions first (we need them for the converters)
+        // Get image dimensions first (we need them for the converters and expression evaluation)
         #[cfg(feature = "image")]
         {
             // Decode to get dimensions
@@ -744,15 +1352,15 @@ fn convert_single_file(
             current_props.shift_remove("gravity");
         }
 
-        // Apply resize
+        // Apply resize (evaluate expressions with current properties)
         if needs_resize {
-            if let Some(mw) = opts.max_width {
+            if let Some(mw) = opts.eval_max_width(&current_props) {
                 current_props.insert("max_width".into(), (mw as i64).into());
             }
-            if let Some(mh) = opts.max_height {
+            if let Some(mh) = opts.eval_max_height(&current_props) {
                 current_props.insert("max_height".into(), (mh as i64).into());
             }
-            if let Some(s) = opts.scale {
+            if let Some(s) = opts.eval_scale(&current_props) {
                 current_props.insert("scale".into(), s.into());
             }
 
@@ -802,10 +1410,16 @@ fn convert_single_file(
                 current_props.insert("height".into(), (img.height() as i64).into());
             }
 
-            // Set watermark options on base image props
+            // Set watermark options on base image props (evaluate expressions)
             current_props.insert("position".into(), opts.watermark_position.clone().into());
-            current_props.insert("opacity".into(), opts.watermark_opacity.into());
-            current_props.insert("margin".into(), (opts.watermark_margin as i64).into());
+            current_props.insert(
+                "opacity".into(),
+                opts.eval_watermark_opacity(&current_props).into(),
+            );
+            current_props.insert(
+                "margin".into(),
+                (opts.eval_watermark_margin(&current_props) as i64).into(),
+            );
 
             // Build multi-input map
             let mut inputs = IndexMap::new();
@@ -854,7 +1468,10 @@ fn convert_single_file(
     if source_format != target_format {
         let target_pattern = PropertyPattern::new().eq("format", target_format.as_str());
 
-        let planner = Planner::new(registry);
+        let mut planner = Planner::new(registry);
+        if let Some(opt) = optimize {
+            planner = planner.optimize(opt);
+        }
         let plan = planner
             .plan(
                 &current_props,
@@ -862,7 +1479,12 @@ fn convert_single_file(
                 Cardinality::One,
                 Cardinality::One,
             )
-            .context("No conversion path found")?;
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "{}",
+                    errors::no_path_error(&source_format, &target_format, registry)
+                )
+            })?;
 
         // Execute format conversion plan using appropriate executor
         let mut ctx = ExecutionContext::new(Arc::new(registry.clone()));

@@ -123,6 +123,33 @@ markdown = ["dep:pulldown-cmark"]
 # HTML to plain text
 html2text = ["dep:html2text"]
 
+# ============================================
+# ARCHIVE FORMATS
+# ============================================
+
+# Tar archives
+tar = ["dep:tar"]
+
+# Zip archives
+zip = ["dep:zip"]
+
+# ============================================
+# SPREADSHEET FORMATS
+# ============================================
+
+# Spreadsheet reading (XLSX, ODS, XLS, XLSB)
+spreadsheet = ["dep:calamine", "dep:serde_json"]
+
+# ============================================
+# SCHEMA-BASED FORMATS (self-describing)
+# ============================================
+
+# Apache Avro - schema embedded in container files
+avro = ["dep:apache-avro", "dep:serde_json"]
+
+# Apache Parquet - columnar format with embedded schema
+parquet = ["dep:parquet", "dep:arrow", "dep:bytes", "dep:serde_json"]
+
 # All formats
 all = [
     "json", "yaml", "toml", "ron", "json5", "xml", "lexpr",
@@ -132,6 +159,10 @@ all = [
     "base64", "hex",
     "gzip", "zstd", "brotli",
     "ini", "charsets", "markdown", "html2text",
+    "tar", "zip",
+    "spreadsheet",
+    "avro",
+    "parquet",
 ]
 
 [dependencies]
@@ -177,3 +208,16 @@ rust-ini = { version = "0.21", optional = true }
 encoding_rs = { version = "0.8", optional = true }
 pulldown-cmark = { version = "0.12", optional = true }
 html2text = { version = "0.14", optional = true }
+
+# --- Archive formats ---
+tar = { version = "0.4", optional = true }
+zip = { version = "2.2", optional = true }
+
+# --- Spreadsheet formats ---
+calamine = { version = "0.32", optional = true }
+
+# --- Schema-based formats ---
+apache-avro = { version = "0.21", optional = true }
+parquet = { version = "57", optional = true }
+arrow = { version = "57", optional = true }
+bytes = { version = "1", optional = true }

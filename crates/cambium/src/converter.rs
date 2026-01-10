@@ -95,6 +95,19 @@ impl ConverterDecl {
             .output("out", PortDecl::single(output_pattern))
     }
 
+    /// Set a cost property for path optimization.
+    ///
+    /// Common cost keys:
+    /// - `quality_loss`: higher = more quality degradation
+    /// - `speed`: higher = slower processing
+    /// - `size`: higher = larger output
+    /// - `cost`: generic fallback cost
+    pub fn cost(mut self, key: impl Into<String>, value: f64) -> Self {
+        use crate::properties::Value;
+        self.costs.insert(key.into(), Value::from(value));
+        self
+    }
+
     /// Check if this converter can handle the given input properties.
     ///
     /// For single-input converters, checks the "in" port.

@@ -28,8 +28,11 @@ audio-all = ["audio", "cambium-audio/all"]
 # Parallel execution (batch processing)
 parallel = ["cambium/parallel"]
 
+# Dynamic expressions in presets (via Dew)
+dew = ["dep:rhizome-dew-core", "dep:rhizome-dew-scalar"]
+
 # Everything (video excluded from default, requires FFmpeg)
-all = ["serde-all", "image-all", "video-all", "audio-all", "parallel"]
+all = ["serde-all", "image-all", "video-all", "audio-all", "parallel", "dew"]
 
 [dependencies]
 cambium.workspace = true
@@ -46,3 +49,12 @@ magic-db = "0.3"
 anyhow = "1"
 indexmap = "2"
 image = { version = "0.25", default-features = false, optional = true }
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+dirs = "6"
+glob = "0.3"
+walkdir = "2"
+
+# Dew expression language (optional)
+rhizome-dew-core = { path = "../../../dew/crates/dew-core", features = ["cond", "func"], optional = true }
+rhizome-dew-scalar = { path = "../../../dew/crates/dew-scalar", optional = true }

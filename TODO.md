@@ -17,15 +17,20 @@
 
 - [x] **Markdown → HTML** - `pulldown-cmark`; CommonMark compliant
 - [x] **HTML → text** - `html2text`; strip tags, preserve structure
-- [ ] **Archives** - `tar`, `zip` crates; extract/create, maps to Multi output
+- [x] **Archives** - `tar`, `zip` crates; extract/create, maps to Multi output
 
 ### Complex (schema-based or native deps)
 
-- [ ] **Spreadsheets** - `calamine` for XLSX/ODS/XLS reading (read-only)
+- [x] **Spreadsheets** - `calamine` for XLSX/ODS/XLS reading (read-only)
+- [x] **Avro** - `apache-avro`; schema embedded in container files (self-describing)
+- [x] **Parquet** - `parquet`; columnar format via Arrow (self-describing)
+
+### Schema-required (need external definition)
+
+These formats require schema files to decode - not "point and shoot":
+
 - [ ] **Protobuf** - `prost`; requires .proto schema files
 - [ ] **Cap'n Proto** - `capnp`; zero-copy, requires .capnp schema files
-- [ ] **Avro** - `apache-avro`; schema embedded in data, good for streaming
-- [ ] **Parquet** - `parquet`; columnar format, complex but powerful for analytics
 
 ---
 
@@ -87,25 +92,75 @@ Implemented:
 - [x] **Batch processing** - `cambium convert *.mp3 --output-dir out/ --to wav`
 - [x] **Progress reporting** - progress bars for batch conversions
 
-Future work:
-- [ ] **Presets** - `--preset web` for common conversion profiles
-- [ ] **Config file** - `~/.config/cambium/config.toml` for defaults
-- [ ] **Better error messages** - actionable suggestions, format hints
+Implemented:
+- [x] **Presets** - `--preset web` for common conversion profiles
+- [x] **Config file** - `~/.config/cambium/config.toml` for defaults
+- [x] **Dynamic presets** - Dew expressions in preset values (requires `dew` feature)
+
+Implemented:
+- [x] **Path optimization** - `--optimize quality|speed|size` for multi-path selection
+- [x] **Better error messages** - actionable suggestions, format hints, typo detection
+
+## Dynamic Presets (Dew Integration)
+
+With the `dew` feature enabled, preset numeric values can be expressions:
+
+```toml
+# ~/.config/cambium/config.toml
+[preset.smart-web]
+max_width = "min(width, 1920)"
+max_height = "min(height, 1080)"
+quality = "if file_size > 5000000 then 70 else 85"
+
+[preset.proportional]
+max_width = "width * 0.5"
+max_height = "height * 0.5"
+```
+
+Available variables (from input file properties):
+- `width`, `height` - image dimensions
+- `file_size` - input file size in bytes
+- Any other numeric property from the input
+
+Expressions use [Dew](https://github.com/rhizome-lab/dew) syntax with standard math functions:
+- Comparison: `<`, `>`, `<=`, `>=`, `==`, `!=`
+- Math: `min`, `max`, `clamp`, `abs`, `sqrt`, `pow`
+- Conditionals: `if ... then ... else ...`
+
+Build with expressions: `cargo build -p cambium-cli --features dew`
 
 ## Testing & Quality
 
 Implemented:
-- [x] **Integration tests** - 9 end-to-end CLI tests
+- [x] **Integration tests** - 18 end-to-end CLI tests covering:
+  - Multi-hop chains (JSON → YAML → TOML, roundtrips)
+  - Batch processing with multiple files
+  - Progress bar and quiet mode
+  - Presets and config
+  - Optimize flag variations
+- [x] **Unit tests** - Archive roundtrips (tar, zip), format converters
 - [x] **CI/CD** - GitHub Actions for check/test/fmt/clippy/doc/build
+
+Implemented:
+- [x] **Expansion executor** - `execute_expanding()` properly fans out 1→N through pipeline
+- [x] **Aggregation executor** - `execute_aggregating()` for N→1 conversions (files → archive)
+- [x] **Compound archives** - `tar.gz`, `tar.zst`, `tgz` with post-aggregation compression
+- [x] **Glob support** - `cambium convert "*.json" --to yaml`
+- [x] **Directory recursion** - `-r/--recursive` for tree traversal
+- [x] **Batch modes** - `--batch-mode all|per-dir` for different grouping strategies
+
+Known limitations (documented, not bugs):
+- Output filenames may collide when processing trees (flat output dir)
 
 Future work:
 - [ ] **Benchmarks** - criterion benchmarks for regression tracking
+- [ ] **Preserve directory structure** - mirror input tree to output tree
 
 ## Distribution
 
 Implemented:
 - [x] **Man pages** - via `cambium manpage` command
 
-Future work:
+Deferred (needs ecosystem consensus):
 - [ ] **Packaging** - cargo-dist, Homebrew formula, AUR package
 - [ ] **Release binaries** - pre-built for Linux/macOS/Windows

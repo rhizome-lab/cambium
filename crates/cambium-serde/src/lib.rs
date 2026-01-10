@@ -52,7 +52,8 @@
 //! - `all` - All formats
 
 use cambium::{
-    ConvertError, ConvertOutput, Converter, ConverterDecl, Properties, PropertyPattern, Registry,
+    ConvertError, ConvertOutput, Converter, ConverterDecl, PortDecl, Properties, PropertyPattern,
+    Registry,
 };
 
 /// Register all enabled serde converters with the registry.
@@ -126,6 +127,34 @@ pub fn register_all(registry: &mut Registry) {
     #[cfg(feature = "html2text")]
     {
         registry.register(HtmlToText);
+    }
+
+    // Register archive converters
+    #[cfg(feature = "tar")]
+    {
+        registry.register(TarExtract);
+        registry.register(TarCreate);
+    }
+    #[cfg(feature = "zip")]
+    {
+        registry.register(ZipExtract);
+        registry.register(ZipCreate);
+    }
+
+    // Register spreadsheet converters
+    #[cfg(feature = "spreadsheet")]
+    {
+        registry.register(SpreadsheetToJson);
+    }
+
+    // Register schema-based format converters
+    #[cfg(feature = "avro")]
+    {
+        registry.register(AvroToJson);
+    }
+    #[cfg(feature = "parquet")]
+    {
+        registry.register(ParquetToJson);
     }
 }
 
@@ -461,16 +490,17 @@ mod gzip_impl {
     use flate2::read::{GzDecoder, GzEncoder};
     use std::io::Read;
 
-    /// Compress raw bytes with gzip.
+    /// Compress bytes with gzip.
     pub struct GzipCompress;
 
     impl Converter for GzipCompress {
         fn decl(&self) -> &ConverterDecl {
             static DECL: std::sync::OnceLock<ConverterDecl> = std::sync::OnceLock::new();
             DECL.get_or_init(|| {
+                // Accept any format - compression is format-agnostic
                 ConverterDecl::simple(
-                    "compression.raw-to-gzip",
-                    PropertyPattern::new().eq("format", "raw"),
+                    "compression.gzip",
+                    PropertyPattern::new(),
                     PropertyPattern::new().eq("format", "gzip"),
                 )
                 .description("Compress with gzip")
@@ -484,6 +514,10 @@ mod gzip_impl {
                 .read_to_end(&mut output)
                 .map_err(|e| ConvertError::Failed(format!("Gzip compression failed: {}", e)))?;
             let mut out_props = props.clone();
+            // Track inner format for decompression
+            if let Some(inner) = props.get("format") {
+                out_props.insert("inner_format".into(), inner.clone());
+            }
             out_props.insert("format".into(), "gzip".into());
             Ok(ConvertOutput::Single(output, out_props))
         }
@@ -525,16 +559,17 @@ pub use gzip_impl::{GzipCompress, GzipDecompress};
 mod zstd_impl {
     use super::*;
 
-    /// Compress raw bytes with zstd.
+    /// Compress bytes with zstd.
     pub struct ZstdCompress;
 
     impl Converter for ZstdCompress {
         fn decl(&self) -> &ConverterDecl {
             static DECL: std::sync::OnceLock<ConverterDecl> = std::sync::OnceLock::new();
             DECL.get_or_init(|| {
+                // Accept any format - compression is format-agnostic
                 ConverterDecl::simple(
-                    "compression.raw-to-zstd",
-                    PropertyPattern::new().eq("format", "raw"),
+                    "compression.zstd",
+                    PropertyPattern::new(),
                     PropertyPattern::new().eq("format", "zstd"),
                 )
                 .description("Compress with zstd")
@@ -545,6 +580,9 @@ mod zstd_impl {
             let output = zstd::encode_all(input, 0)
                 .map_err(|e| ConvertError::Failed(format!("Zstd compression failed: {}", e)))?;
             let mut out_props = props.clone();
+            if let Some(inner) = props.get("format") {
+                out_props.insert("inner_format".into(), inner.clone());
+            }
             out_props.insert("format".into(), "zstd".into());
             Ok(ConvertOutput::Single(output, out_props))
         }
@@ -585,16 +623,17 @@ mod brotli_impl {
     use super::*;
     use std::io::Read;
 
-    /// Compress raw bytes with brotli.
+    /// Compress bytes with brotli.
     pub struct BrotliCompress;
 
     impl Converter for BrotliCompress {
         fn decl(&self) -> &ConverterDecl {
             static DECL: std::sync::OnceLock<ConverterDecl> = std::sync::OnceLock::new();
             DECL.get_or_init(|| {
+                // Accept any format - compression is format-agnostic
                 ConverterDecl::simple(
-                    "compression.raw-to-brotli",
-                    PropertyPattern::new().eq("format", "raw"),
+                    "compression.brotli",
+                    PropertyPattern::new(),
                     PropertyPattern::new().eq("format", "brotli"),
                 )
                 .description("Compress with brotli")
@@ -608,6 +647,9 @@ mod brotli_impl {
                 .read_to_end(&mut output)
                 .map_err(|e| ConvertError::Failed(format!("Brotli compression failed: {}", e)))?;
             let mut out_props = props.clone();
+            if let Some(inner) = props.get("format") {
+                out_props.insert("inner_format".into(), inner.clone());
+            }
             out_props.insert("format".into(), "brotli".into());
             Ok(ConvertOutput::Single(output, out_props))
         }
@@ -941,6 +983,668 @@ mod html2text_impl {
 
 #[cfg(feature = "html2text")]
 pub use html2text_impl::HtmlToText;
+
+// ============================================
+// Tar archives
+// ============================================
+
+#[cfg(feature = "tar")]
+mod tar_impl {
+    use super::*;
+    use std::io::{Cursor, Read};
+
+    /// Extract files from a tar archive.
+    pub struct TarExtract;
+
+    impl Converter for TarExtract {
+        fn decl(&self) -> &ConverterDecl {
+            static DECL: std::sync::OnceLock<ConverterDecl> = std::sync::OnceLock::new();
+            DECL.get_or_init(|| {
+                ConverterDecl::simple(
+                    "archive.tar-extract",
+                    PropertyPattern::new().eq("format", "tar"),
+                    PropertyPattern::new().eq("format", "raw"),
+                )
+                .description("Extract files from tar archive")
+            })
+        }
+
+        fn convert(&self, input: &[u8], props: &Properties) -> Result<ConvertOutput, ConvertError> {
+            let cursor = Cursor::new(input);
+            let mut archive = tar::Archive::new(cursor);
+
+            let mut outputs = Vec::new();
+            for entry in archive
+                .entries()
+                .map_err(|e| ConvertError::InvalidInput(format!("Invalid tar archive: {}", e)))?
+            {
+                let mut entry = entry
+                    .map_err(|e| ConvertError::InvalidInput(format!("Invalid tar entry: {}", e)))?;
+
+                // Skip directories
+                if entry.header().entry_type().is_dir() {
+                    continue;
+                }
+
+                let path = entry
+                    .path()
+                    .map_err(|e| ConvertError::InvalidInput(format!("Invalid path: {}", e)))?
+                    .to_string_lossy()
+                    .to_string();
+
+                let mut data = Vec::new();
+                entry.read_to_end(&mut data).map_err(|e| {
+                    ConvertError::InvalidInput(format!("Failed to read entry: {}", e))
+                })?;
+
+                let mut out_props = props.clone();
+                out_props.insert("format".into(), "raw".into());
+                out_props.insert("path".into(), path.into());
+
+                outputs.push((data, out_props));
+            }
+
+            Ok(ConvertOutput::Multiple(outputs))
+        }
+    }
+
+    /// Create a tar archive from multiple files.
+    pub struct TarCreate;
+
+    impl Converter for TarCreate {
+        fn decl(&self) -> &ConverterDecl {
+            static DECL: std::sync::OnceLock<ConverterDecl> = std::sync::OnceLock::new();
+            DECL.get_or_init(|| {
+                ConverterDecl::new("archive.tar-create")
+                    .input(
+                        "in",
+                        PortDecl::list(PropertyPattern::new().eq("format", "raw")),
+                    )
+                    .output(
+                        "out",
+                        PortDecl::single(PropertyPattern::new().eq("format", "tar")),
+                    )
+                    .description("Create tar archive from files")
+            })
+        }
+
+        fn convert(
+            &self,
+            _input: &[u8],
+            _props: &Properties,
+        ) -> Result<ConvertOutput, ConvertError> {
+            Err(ConvertError::BatchNotSupported)
+        }
+
+        fn convert_batch(
+            &self,
+            inputs: &[(&[u8], &Properties)],
+        ) -> Result<ConvertOutput, ConvertError> {
+            let mut output = Vec::new();
+            {
+                let mut builder = tar::Builder::new(&mut output);
+
+                for (data, props) in inputs {
+                    let path = props.get("path").and_then(|v| v.as_str()).ok_or_else(|| {
+                        ConvertError::InvalidInput("Missing 'path' property for tar entry".into())
+                    })?;
+
+                    let mut header = tar::Header::new_gnu();
+                    header.set_size(data.len() as u64);
+                    header.set_mode(0o644);
+                    header.set_cksum();
+
+                    builder.append_data(&mut header, path, *data).map_err(|e| {
+                        ConvertError::Failed(format!("Failed to add entry '{}': {}", path, e))
+                    })?;
+                }
+
+                builder
+                    .finish()
+                    .map_err(|e| ConvertError::Failed(format!("Failed to finalize tar: {}", e)))?;
+            }
+
+            let mut out_props = Properties::new();
+            out_props.insert("format".into(), "tar".into());
+            Ok(ConvertOutput::Single(output, out_props))
+        }
+    }
+}
+
+#[cfg(feature = "tar")]
+pub use tar_impl::{TarCreate, TarExtract};
+
+// ============================================
+// Zip archives
+// ============================================
+
+#[cfg(feature = "zip")]
+mod zip_impl {
+    use super::*;
+    use std::io::{Cursor, Read, Write};
+
+    /// Extract files from a zip archive.
+    pub struct ZipExtract;
+
+    impl Converter for ZipExtract {
+        fn decl(&self) -> &ConverterDecl {
+            static DECL: std::sync::OnceLock<ConverterDecl> = std::sync::OnceLock::new();
+            DECL.get_or_init(|| {
+                ConverterDecl::simple(
+                    "archive.zip-extract",
+                    PropertyPattern::new().eq("format", "zip"),
+                    PropertyPattern::new().eq("format", "raw"),
+                )
+                .description("Extract files from zip archive")
+            })
+        }
+
+        fn convert(&self, input: &[u8], props: &Properties) -> Result<ConvertOutput, ConvertError> {
+            let cursor = Cursor::new(input);
+            let mut archive = zip::ZipArchive::new(cursor)
+                .map_err(|e| ConvertError::InvalidInput(format!("Invalid zip archive: {}", e)))?;
+
+            let mut outputs = Vec::new();
+            for i in 0..archive.len() {
+                let mut file = archive
+                    .by_index(i)
+                    .map_err(|e| ConvertError::InvalidInput(format!("Invalid zip entry: {}", e)))?;
+
+                // Skip directories
+                if file.is_dir() {
+                    continue;
+                }
+
+                let path = file.name().to_string();
+
+                let mut data = Vec::new();
+                file.read_to_end(&mut data).map_err(|e| {
+                    ConvertError::InvalidInput(format!("Failed to read entry: {}", e))
+                })?;
+
+                let mut out_props = props.clone();
+                out_props.insert("format".into(), "raw".into());
+                out_props.insert("path".into(), path.into());
+
+                outputs.push((data, out_props));
+            }
+
+            Ok(ConvertOutput::Multiple(outputs))
+        }
+    }
+
+    /// Create a zip archive from multiple files.
+    pub struct ZipCreate;
+
+    impl Converter for ZipCreate {
+        fn decl(&self) -> &ConverterDecl {
+            static DECL: std::sync::OnceLock<ConverterDecl> = std::sync::OnceLock::new();
+            DECL.get_or_init(|| {
+                ConverterDecl::new("archive.zip-create")
+                    .input(
+                        "in",
+                        PortDecl::list(PropertyPattern::new().eq("format", "raw")),
+                    )
+                    .output(
+                        "out",
+                        PortDecl::single(PropertyPattern::new().eq("format", "zip")),
+                    )
+                    .description("Create zip archive from files")
+            })
+        }
+
+        fn convert(
+            &self,
+            _input: &[u8],
+            _props: &Properties,
+        ) -> Result<ConvertOutput, ConvertError> {
+            Err(ConvertError::BatchNotSupported)
+        }
+
+        fn convert_batch(
+            &self,
+            inputs: &[(&[u8], &Properties)],
+        ) -> Result<ConvertOutput, ConvertError> {
+            let mut output = Cursor::new(Vec::new());
+            {
+                let mut writer = zip::ZipWriter::new(&mut output);
+                let options = zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Deflated);
+
+                for (data, props) in inputs {
+                    let path = props.get("path").and_then(|v| v.as_str()).ok_or_else(|| {
+                        ConvertError::InvalidInput("Missing 'path' property for zip entry".into())
+                    })?;
+
+                    writer.start_file(path, options).map_err(|e| {
+                        ConvertError::Failed(format!("Failed to add entry '{}': {}", path, e))
+                    })?;
+
+                    writer.write_all(data).map_err(|e| {
+                        ConvertError::Failed(format!("Failed to write entry '{}': {}", path, e))
+                    })?;
+                }
+
+                writer
+                    .finish()
+                    .map_err(|e| ConvertError::Failed(format!("Failed to finalize zip: {}", e)))?;
+            }
+
+            let mut out_props = Properties::new();
+            out_props.insert("format".into(), "zip".into());
+            Ok(ConvertOutput::Single(output.into_inner(), out_props))
+        }
+    }
+}
+
+#[cfg(feature = "zip")]
+pub use zip_impl::{ZipCreate, ZipExtract};
+
+// ============================================
+// SPREADSHEET FORMATS
+// ============================================
+
+#[cfg(feature = "spreadsheet")]
+mod spreadsheet_impl {
+    use super::*;
+    use calamine::{Data, Reader, open_workbook_auto_from_rs};
+    use std::io::Cursor;
+
+    /// Read spreadsheet files (XLSX, ODS, XLS, XLSB) to JSON.
+    ///
+    /// Input properties:
+    /// - `format`: "xlsx", "ods", "xls", or "xlsb"
+    /// - `sheet`: optional sheet name or index (default: all sheets)
+    /// - `headers`: if "true", use first row as object keys
+    ///
+    /// Output: JSON with structure:
+    /// - If headers=false: `{"sheets": {"SheetName": [[cell, cell, ...], ...]}}`
+    /// - If headers=true: `{"sheets": {"SheetName": [{"col": value, ...}, ...]}}`
+    pub struct SpreadsheetToJson;
+
+    impl SpreadsheetToJson {
+        fn decl() -> ConverterDecl {
+            use cambium::{Predicate, Value};
+            ConverterDecl::simple(
+                "spreadsheet-to-json",
+                PropertyPattern::new().with(
+                    "format",
+                    Predicate::OneOf(vec![
+                        Value::from("xlsx"),
+                        Value::from("ods"),
+                        Value::from("xls"),
+                        Value::from("xlsb"),
+                    ]),
+                ),
+                PropertyPattern::new().eq("format", "json"),
+            )
+            .description("Read spreadsheet to JSON")
+        }
+    }
+
+    impl Converter for SpreadsheetToJson {
+        fn decl(&self) -> &ConverterDecl {
+            static DECL: std::sync::OnceLock<ConverterDecl> = std::sync::OnceLock::new();
+            DECL.get_or_init(Self::decl)
+        }
+
+        fn convert(&self, input: &[u8], props: &Properties) -> Result<ConvertOutput, ConvertError> {
+            let cursor = Cursor::new(input);
+            let mut workbook = open_workbook_auto_from_rs(cursor).map_err(|e| {
+                ConvertError::InvalidInput(format!("Failed to open spreadsheet: {}", e))
+            })?;
+
+            let use_headers = props
+                .get("headers")
+                .and_then(|v| v.as_str())
+                .map(|s| s == "true")
+                .unwrap_or(false);
+
+            let sheet_filter = props.get("sheet").and_then(|v| v.as_str());
+
+            let sheet_names: Vec<String> = workbook.sheet_names().to_vec();
+            let mut sheets = serde_json::Map::new();
+
+            for name in &sheet_names {
+                // Filter by sheet name if specified
+                if let Some(filter) = sheet_filter {
+                    if name != filter {
+                        continue;
+                    }
+                }
+
+                if let Ok(range) = workbook.worksheet_range(name) {
+                    let rows: Vec<Vec<serde_json::Value>> = range
+                        .rows()
+                        .map(|row| {
+                            row.iter()
+                                .map(|cell| match cell {
+                                    Data::Empty => serde_json::Value::Null,
+                                    Data::String(s) => serde_json::Value::String(s.clone()),
+                                    Data::Int(n) => serde_json::json!(*n),
+                                    Data::Float(f) => serde_json::json!(*f),
+                                    Data::Bool(b) => serde_json::Value::Bool(*b),
+                                    Data::Error(e) => {
+                                        serde_json::Value::String(format!("#ERROR:{:?}", e))
+                                    }
+                                    Data::DateTime(dt) => {
+                                        serde_json::Value::String(format!("{}", dt))
+                                    }
+                                    Data::DateTimeIso(s) => serde_json::Value::String(s.clone()),
+                                    Data::DurationIso(s) => serde_json::Value::String(s.clone()),
+                                })
+                                .collect()
+                        })
+                        .collect();
+
+                    let sheet_data = if use_headers && !rows.is_empty() {
+                        // Use first row as headers
+                        let headers: Vec<String> = rows[0]
+                            .iter()
+                            .enumerate()
+                            .map(|(i, v)| {
+                                v.as_str()
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| format!("col_{}", i))
+                            })
+                            .collect();
+
+                        let objects: Vec<serde_json::Value> = rows[1..]
+                            .iter()
+                            .map(|row| {
+                                let mut obj = serde_json::Map::new();
+                                for (i, cell) in row.iter().enumerate() {
+                                    let key = headers
+                                        .get(i)
+                                        .cloned()
+                                        .unwrap_or_else(|| format!("col_{}", i));
+                                    obj.insert(key, cell.clone());
+                                }
+                                serde_json::Value::Object(obj)
+                            })
+                            .collect();
+
+                        serde_json::Value::Array(objects)
+                    } else {
+                        serde_json::Value::Array(
+                            rows.into_iter().map(serde_json::Value::Array).collect(),
+                        )
+                    };
+
+                    sheets.insert(name.clone(), sheet_data);
+                }
+            }
+
+            let result = serde_json::json!({ "sheets": sheets });
+            let output = serde_json::to_vec_pretty(&result)
+                .map_err(|e| ConvertError::Failed(format!("JSON serialization failed: {}", e)))?;
+
+            let mut out_props = Properties::new();
+            out_props.insert("format".into(), "json".into());
+
+            Ok(ConvertOutput::Single(output, out_props))
+        }
+    }
+}
+
+#[cfg(feature = "spreadsheet")]
+pub use spreadsheet_impl::SpreadsheetToJson;
+
+// ============================================
+// SCHEMA-BASED FORMATS (self-describing)
+// ============================================
+
+#[cfg(feature = "avro")]
+mod avro_impl {
+    use super::*;
+    use apache_avro::Reader;
+
+    /// Read Avro container files to JSON.
+    ///
+    /// Avro container files are self-describing - the schema is embedded.
+    /// Outputs a JSON array of records.
+    pub struct AvroToJson;
+
+    impl AvroToJson {
+        fn decl() -> ConverterDecl {
+            ConverterDecl::simple(
+                "avro-to-json",
+                PropertyPattern::new().eq("format", "avro"),
+                PropertyPattern::new().eq("format", "json"),
+            )
+            .description("Read Avro container file to JSON")
+        }
+    }
+
+    impl Converter for AvroToJson {
+        fn decl(&self) -> &ConverterDecl {
+            static DECL: std::sync::OnceLock<ConverterDecl> = std::sync::OnceLock::new();
+            DECL.get_or_init(Self::decl)
+        }
+
+        fn convert(
+            &self,
+            input: &[u8],
+            _props: &Properties,
+        ) -> Result<ConvertOutput, ConvertError> {
+            let reader = Reader::new(input)
+                .map_err(|e| ConvertError::InvalidInput(format!("Failed to read Avro: {}", e)))?;
+
+            let mut records = Vec::new();
+            for value in reader {
+                let value = value.map_err(|e| {
+                    ConvertError::Failed(format!("Failed to read Avro record: {}", e))
+                })?;
+                // Convert Avro value to JSON
+                let json_value = avro_value_to_json(&value);
+                records.push(json_value);
+            }
+
+            let output = serde_json::to_vec_pretty(&serde_json::Value::Array(records))
+                .map_err(|e| ConvertError::Failed(format!("JSON serialization failed: {}", e)))?;
+
+            let mut out_props = Properties::new();
+            out_props.insert("format".into(), "json".into());
+
+            Ok(ConvertOutput::Single(output, out_props))
+        }
+    }
+
+    /// Convert an Avro value to a JSON value.
+    fn avro_value_to_json(value: &apache_avro::types::Value) -> serde_json::Value {
+        use apache_avro::types::Value as AV;
+        match value {
+            AV::Null => serde_json::Value::Null,
+            AV::Boolean(b) => serde_json::Value::Bool(*b),
+            AV::Int(n) => serde_json::json!(*n),
+            AV::Long(n) => serde_json::json!(*n),
+            AV::Float(f) => serde_json::json!(*f),
+            AV::Double(d) => serde_json::json!(*d),
+            AV::Bytes(b) | AV::Fixed(_, b) => {
+                // Encode bytes as base64
+                use base64::Engine;
+                serde_json::Value::String(base64::engine::general_purpose::STANDARD.encode(b))
+            }
+            AV::String(s) => serde_json::Value::String(s.clone()),
+            AV::Enum(_, s) => serde_json::Value::String(s.clone()),
+            AV::Union(_, inner) => avro_value_to_json(inner),
+            AV::Array(arr) => {
+                serde_json::Value::Array(arr.iter().map(avro_value_to_json).collect())
+            }
+            AV::Map(map) => {
+                let obj: serde_json::Map<String, serde_json::Value> = map
+                    .iter()
+                    .map(|(k, v)| (k.clone(), avro_value_to_json(v)))
+                    .collect();
+                serde_json::Value::Object(obj)
+            }
+            AV::Record(fields) => {
+                let obj: serde_json::Map<String, serde_json::Value> = fields
+                    .iter()
+                    .map(|(k, v)| (k.clone(), avro_value_to_json(v)))
+                    .collect();
+                serde_json::Value::Object(obj)
+            }
+            AV::Date(d) => serde_json::json!(*d),
+            AV::Decimal(d) => serde_json::Value::String(format!("{:?}", d)),
+            AV::TimeMillis(t) => serde_json::json!(*t),
+            AV::TimeMicros(t) => serde_json::json!(*t),
+            AV::TimestampMillis(t) => serde_json::json!(*t),
+            AV::TimestampMicros(t) => serde_json::json!(*t),
+            AV::TimestampNanos(t) => serde_json::json!(*t),
+            AV::LocalTimestampMillis(t) => serde_json::json!(*t),
+            AV::LocalTimestampMicros(t) => serde_json::json!(*t),
+            AV::LocalTimestampNanos(t) => serde_json::json!(*t),
+            AV::Duration(d) => serde_json::Value::String(format!("{:?}", d)),
+            AV::Uuid(u) => serde_json::Value::String(u.to_string()),
+            AV::BigDecimal(bd) => serde_json::Value::String(bd.to_string()),
+        }
+    }
+}
+
+#[cfg(feature = "avro")]
+pub use avro_impl::AvroToJson;
+
+#[cfg(feature = "parquet")]
+mod parquet_impl {
+    use super::*;
+    use arrow::array::*;
+    use bytes::Bytes;
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+
+    /// Read Parquet files to JSON.
+    ///
+    /// Parquet files are self-describing - the schema is in the file footer.
+    /// Outputs a JSON array of records.
+    pub struct ParquetToJson;
+
+    impl ParquetToJson {
+        fn decl() -> ConverterDecl {
+            ConverterDecl::simple(
+                "parquet-to-json",
+                PropertyPattern::new().eq("format", "parquet"),
+                PropertyPattern::new().eq("format", "json"),
+            )
+            .description("Read Parquet file to JSON")
+        }
+    }
+
+    impl Converter for ParquetToJson {
+        fn decl(&self) -> &ConverterDecl {
+            static DECL: std::sync::OnceLock<ConverterDecl> = std::sync::OnceLock::new();
+            DECL.get_or_init(Self::decl)
+        }
+
+        fn convert(
+            &self,
+            input: &[u8],
+            _props: &Properties,
+        ) -> Result<ConvertOutput, ConvertError> {
+            let bytes = Bytes::copy_from_slice(input);
+            let builder = ParquetRecordBatchReaderBuilder::try_new(bytes).map_err(|e| {
+                ConvertError::InvalidInput(format!("Failed to read Parquet: {}", e))
+            })?;
+
+            let reader = builder.build().map_err(|e| {
+                ConvertError::Failed(format!("Failed to build Parquet reader: {}", e))
+            })?;
+
+            let schema = reader.schema();
+            let mut all_records = Vec::new();
+
+            for batch_result in reader {
+                let batch = batch_result.map_err(|e| {
+                    ConvertError::Failed(format!("Failed to read Parquet batch: {}", e))
+                })?;
+
+                // Convert each row to JSON
+                for row_idx in 0..batch.num_rows() {
+                    let mut record = serde_json::Map::new();
+                    for (col_idx, field) in schema.fields().iter().enumerate() {
+                        let column = batch.column(col_idx);
+                        let value = array_value_to_json(column.as_ref(), row_idx);
+                        record.insert(field.name().clone(), value);
+                    }
+                    all_records.push(serde_json::Value::Object(record));
+                }
+            }
+
+            let output = serde_json::to_vec_pretty(&serde_json::Value::Array(all_records))
+                .map_err(|e| ConvertError::Failed(format!("JSON serialization failed: {}", e)))?;
+
+            let mut out_props = Properties::new();
+            out_props.insert("format".into(), "json".into());
+
+            Ok(ConvertOutput::Single(output, out_props))
+        }
+    }
+
+    /// Convert an Arrow array value at a given index to JSON.
+    fn array_value_to_json(array: &dyn Array, idx: usize) -> serde_json::Value {
+        if array.is_null(idx) {
+            return serde_json::Value::Null;
+        }
+
+        // Handle different Arrow data types
+        if let Some(arr) = array.as_any().downcast_ref::<StringArray>() {
+            return serde_json::Value::String(arr.value(idx).to_string());
+        }
+        if let Some(arr) = array.as_any().downcast_ref::<LargeStringArray>() {
+            return serde_json::Value::String(arr.value(idx).to_string());
+        }
+        if let Some(arr) = array.as_any().downcast_ref::<Int32Array>() {
+            return serde_json::json!(arr.value(idx));
+        }
+        if let Some(arr) = array.as_any().downcast_ref::<Int64Array>() {
+            return serde_json::json!(arr.value(idx));
+        }
+        if let Some(arr) = array.as_any().downcast_ref::<Float32Array>() {
+            return serde_json::json!(arr.value(idx));
+        }
+        if let Some(arr) = array.as_any().downcast_ref::<Float64Array>() {
+            return serde_json::json!(arr.value(idx));
+        }
+        if let Some(arr) = array.as_any().downcast_ref::<BooleanArray>() {
+            return serde_json::Value::Bool(arr.value(idx));
+        }
+        if let Some(arr) = array.as_any().downcast_ref::<Int8Array>() {
+            return serde_json::json!(arr.value(idx));
+        }
+        if let Some(arr) = array.as_any().downcast_ref::<Int16Array>() {
+            return serde_json::json!(arr.value(idx));
+        }
+        if let Some(arr) = array.as_any().downcast_ref::<UInt8Array>() {
+            return serde_json::json!(arr.value(idx));
+        }
+        if let Some(arr) = array.as_any().downcast_ref::<UInt16Array>() {
+            return serde_json::json!(arr.value(idx));
+        }
+        if let Some(arr) = array.as_any().downcast_ref::<UInt32Array>() {
+            return serde_json::json!(arr.value(idx));
+        }
+        if let Some(arr) = array.as_any().downcast_ref::<UInt64Array>() {
+            return serde_json::json!(arr.value(idx));
+        }
+        if let Some(arr) = array.as_any().downcast_ref::<BinaryArray>() {
+            use base64::Engine;
+            return serde_json::Value::String(
+                base64::engine::general_purpose::STANDARD.encode(arr.value(idx)),
+            );
+        }
+        if let Some(arr) = array.as_any().downcast_ref::<LargeBinaryArray>() {
+            use base64::Engine;
+            return serde_json::Value::String(
+                base64::engine::general_purpose::STANDARD.encode(arr.value(idx)),
+            );
+        }
+
+        // Fallback for unsupported types
+        serde_json::Value::String(format!("<unsupported: {:?}>", array.data_type()))
+    }
+}
+
+#[cfg(feature = "parquet")]
+pub use parquet_impl::ParquetToJson;
 
 /// Deserialize bytes to a serde Value.
 fn deserialize(format: &str, data: &[u8]) -> Result<serde_json::Value, ConvertError> {
@@ -1284,6 +1988,32 @@ mod tests {
             expected += 1;
         }
 
+        // Plus archive converters
+        #[cfg(feature = "tar")]
+        {
+            expected += 2;
+        }
+        #[cfg(feature = "zip")]
+        {
+            expected += 2;
+        }
+
+        // Plus spreadsheet converters
+        #[cfg(feature = "spreadsheet")]
+        {
+            expected += 1;
+        }
+
+        // Plus schema-based format converters
+        #[cfg(feature = "avro")]
+        {
+            expected += 1;
+        }
+        #[cfg(feature = "parquet")]
+        {
+            expected += 1;
+        }
+
         assert_eq!(registry.len(), expected);
     }
 
@@ -1550,5 +2280,234 @@ mod tests {
         assert!(output_str.contains("Title"));
         assert!(output_str.contains("Hello"));
         assert!(output_str.contains("World"));
+    }
+
+    #[test]
+    #[cfg(feature = "tar")]
+    fn test_tar_roundtrip() {
+        use crate::{TarCreate, TarExtract};
+
+        // Create some test files
+        let files = vec![
+            (
+                b"Hello from file 1".to_vec(),
+                Properties::new()
+                    .with("path", "dir/file1.txt")
+                    .with("format", "raw"),
+            ),
+            (
+                b"Content of file 2".to_vec(),
+                Properties::new()
+                    .with("path", "file2.txt")
+                    .with("format", "raw"),
+            ),
+        ];
+
+        // Create tar archive
+        let inputs: Vec<(&[u8], &Properties)> =
+            files.iter().map(|(d, p)| (d.as_slice(), p)).collect();
+        let archive_result = TarCreate.convert_batch(&inputs).unwrap();
+        let (archive_data, archive_props) = match archive_result {
+            ConvertOutput::Single(b, p) => (b, p),
+            _ => panic!("Expected single"),
+        };
+        assert_eq!(archive_props.get("format").unwrap().as_str(), Some("tar"));
+
+        // Extract tar archive
+        let extract_result = TarExtract.convert(&archive_data, &archive_props).unwrap();
+        let extracted = match extract_result {
+            ConvertOutput::Multiple(files) => files,
+            _ => panic!("Expected multiple"),
+        };
+
+        assert_eq!(extracted.len(), 2);
+
+        // Find and verify files
+        let file1 = extracted
+            .iter()
+            .find(|(_, p)| p.get("path").unwrap().as_str() == Some("dir/file1.txt"))
+            .unwrap();
+        assert_eq!(file1.0, b"Hello from file 1");
+
+        let file2 = extracted
+            .iter()
+            .find(|(_, p)| p.get("path").unwrap().as_str() == Some("file2.txt"))
+            .unwrap();
+        assert_eq!(file2.0, b"Content of file 2");
+    }
+
+    #[test]
+    #[cfg(feature = "zip")]
+    fn test_zip_roundtrip() {
+        use crate::{ZipCreate, ZipExtract};
+
+        // Create some test files
+        let files = vec![
+            (
+                b"Hello from file 1".to_vec(),
+                Properties::new()
+                    .with("path", "dir/file1.txt")
+                    .with("format", "raw"),
+            ),
+            (
+                b"Content of file 2".to_vec(),
+                Properties::new()
+                    .with("path", "file2.txt")
+                    .with("format", "raw"),
+            ),
+        ];
+
+        // Create zip archive
+        let inputs: Vec<(&[u8], &Properties)> =
+            files.iter().map(|(d, p)| (d.as_slice(), p)).collect();
+        let archive_result = ZipCreate.convert_batch(&inputs).unwrap();
+        let (archive_data, archive_props) = match archive_result {
+            ConvertOutput::Single(b, p) => (b, p),
+            _ => panic!("Expected single"),
+        };
+        assert_eq!(archive_props.get("format").unwrap().as_str(), Some("zip"));
+
+        // Extract zip archive
+        let extract_result = ZipExtract.convert(&archive_data, &archive_props).unwrap();
+        let extracted = match extract_result {
+            ConvertOutput::Multiple(files) => files,
+            _ => panic!("Expected multiple"),
+        };
+
+        assert_eq!(extracted.len(), 2);
+
+        // Find and verify files
+        let file1 = extracted
+            .iter()
+            .find(|(_, p)| p.get("path").unwrap().as_str() == Some("dir/file1.txt"))
+            .unwrap();
+        assert_eq!(file1.0, b"Hello from file 1");
+
+        let file2 = extracted
+            .iter()
+            .find(|(_, p)| p.get("path").unwrap().as_str() == Some("file2.txt"))
+            .unwrap();
+        assert_eq!(file2.0, b"Content of file 2");
+    }
+
+    #[test]
+    #[cfg(feature = "spreadsheet")]
+    fn test_spreadsheet_invalid_input() {
+        use crate::SpreadsheetToJson;
+
+        // Invalid data should produce an error
+        let invalid_data = b"not a spreadsheet";
+        let props = Properties::new().with("format", "xlsx");
+
+        let result = SpreadsheetToJson.convert(invalid_data, &props);
+        match result {
+            Err(e) => assert!(e.to_string().contains("Failed to open spreadsheet")),
+            Ok(_) => panic!("Expected error for invalid spreadsheet data"),
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "parquet")]
+    fn test_parquet_roundtrip() {
+        use crate::ParquetToJson;
+        use arrow::array::{Int32Array, StringArray};
+        use arrow::datatypes::{DataType, Field, Schema};
+        use arrow::record_batch::RecordBatch;
+        use parquet::arrow::ArrowWriter;
+        use std::sync::Arc;
+
+        // Define schema
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("name", DataType::Utf8, false),
+            Field::new("age", DataType::Int32, false),
+        ]));
+
+        // Create data
+        let names = StringArray::from(vec!["Alice", "Bob"]);
+        let ages = Int32Array::from(vec![30, 25]);
+
+        let batch =
+            RecordBatch::try_new(schema.clone(), vec![Arc::new(names), Arc::new(ages)]).unwrap();
+
+        // Write to Parquet
+        let mut parquet_buffer = Vec::new();
+        {
+            let mut writer = ArrowWriter::try_new(&mut parquet_buffer, schema, None).unwrap();
+            writer.write(&batch).unwrap();
+            writer.close().unwrap();
+        }
+
+        // Convert to JSON
+        let props = Properties::new().with("format", "parquet");
+        let result = ParquetToJson.convert(&parquet_buffer, &props).unwrap();
+        let (output, out_props) = match result {
+            ConvertOutput::Single(b, p) => (b, p),
+            _ => panic!("Expected single"),
+        };
+
+        assert_eq!(out_props.get("format").unwrap().as_str(), Some("json"));
+
+        let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert!(json.is_array());
+        let arr = json.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["name"], "Alice");
+        assert_eq!(arr[0]["age"], 30);
+        assert_eq!(arr[1]["name"], "Bob");
+        assert_eq!(arr[1]["age"], 25);
+    }
+
+    #[test]
+    #[cfg(feature = "avro")]
+    fn test_avro_roundtrip() {
+        use crate::AvroToJson;
+        use apache_avro::{Schema, Writer, types::Record};
+
+        // Define a simple schema
+        let raw_schema = r#"
+        {
+            "type": "record",
+            "name": "test",
+            "fields": [
+                {"name": "name", "type": "string"},
+                {"name": "age", "type": "int"}
+            ]
+        }
+        "#;
+        let schema = Schema::parse_str(raw_schema).unwrap();
+
+        // Create some records
+        let mut writer = Writer::new(&schema, Vec::new());
+
+        let mut record1 = Record::new(&schema).unwrap();
+        record1.put("name", "Alice");
+        record1.put("age", 30i32);
+        writer.append(record1).unwrap();
+
+        let mut record2 = Record::new(&schema).unwrap();
+        record2.put("name", "Bob");
+        record2.put("age", 25i32);
+        writer.append(record2).unwrap();
+
+        let avro_data = writer.into_inner().unwrap();
+
+        // Convert to JSON
+        let props = Properties::new().with("format", "avro");
+        let result = AvroToJson.convert(&avro_data, &props).unwrap();
+        let (output, out_props) = match result {
+            ConvertOutput::Single(b, p) => (b, p),
+            _ => panic!("Expected single"),
+        };
+
+        assert_eq!(out_props.get("format").unwrap().as_str(), Some("json"));
+
+        let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert!(json.is_array());
+        let arr = json.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["name"], "Alice");
+        assert_eq!(arr[0]["age"], 30);
+        assert_eq!(arr[1]["name"], "Bob");
+        assert_eq!(arr[1]["age"], 25);
     }
 }

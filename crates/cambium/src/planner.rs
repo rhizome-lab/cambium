@@ -10,6 +10,18 @@ use crate::registry::Registry;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashSet};
 
+/// Optimization target for path selection.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum OptimizeTarget {
+    /// Minimize quality loss (prefer lossless or high-quality paths).
+    Quality,
+    /// Minimize processing time (prefer fast converters).
+    #[default]
+    Speed,
+    /// Minimize output size (prefer compression, lossy formats).
+    Size,
+}
+
 /// A planned conversion path.
 #[derive(Debug, Clone)]
 pub struct Plan {
@@ -84,6 +96,7 @@ impl Ord for SearchNode {
 pub struct Planner<'a> {
     registry: &'a Registry,
     max_depth: usize,
+    optimize: OptimizeTarget,
 }
 
 impl<'a> Planner<'a> {
@@ -92,12 +105,19 @@ impl<'a> Planner<'a> {
         Self {
             registry,
             max_depth: 10,
+            optimize: OptimizeTarget::default(),
         }
     }
 
     /// Set maximum search depth.
     pub fn max_depth(mut self, depth: usize) -> Self {
         self.max_depth = depth;
+        self
+    }
+
+    /// Set optimization target for path selection.
+    pub fn optimize(mut self, target: OptimizeTarget) -> Self {
+        self.optimize = target;
         self
     }
 
@@ -232,12 +252,8 @@ impl<'a> Planner<'a> {
             }
         }
 
-        // Calculate step cost
-        let step_cost = decl
-            .costs
-            .get("cost")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(1.0);
+        // Calculate step cost based on optimization target
+        let step_cost = self.cost_for_converter(decl);
 
         let new_cost = current.cost + step_cost;
         let heuristic = self.heuristic(&output_props, target);
@@ -283,6 +299,29 @@ impl<'a> Planner<'a> {
             .and_then(|v| v.as_str())
             .unwrap_or("unknown");
         format!("{}:{:?}", format, cardinality)
+    }
+
+    /// Get the cost for a converter based on optimization target.
+    ///
+    /// Cost properties:
+    /// - `quality_loss`: higher = more quality degradation (used for Quality optimization)
+    /// - `speed`: higher = slower (used for Speed optimization)
+    /// - `size`: higher = larger output (used for Size optimization)
+    ///
+    /// Falls back to generic `cost` property, then to 1.0.
+    fn cost_for_converter(&self, decl: &ConverterDecl) -> f64 {
+        let cost_key = match self.optimize {
+            OptimizeTarget::Quality => "quality_loss",
+            OptimizeTarget::Speed => "speed",
+            OptimizeTarget::Size => "size",
+        };
+
+        // Try optimization-specific cost, fall back to generic "cost", then 1.0
+        decl.costs
+            .get(cost_key)
+            .and_then(|v| v.as_f64())
+            .or_else(|| decl.costs.get("cost").and_then(|v| v.as_f64()))
+            .unwrap_or(1.0)
     }
 }
 
@@ -410,5 +449,67 @@ mod tests {
 
         assert_eq!(plan.steps.len(), 1);
         assert_eq!(plan.steps[0].converter_id, "frames-to-gif");
+    }
+
+    #[test]
+    fn test_optimize_quality_vs_speed() {
+        // Two paths from A to C:
+        // - A -> B -> C (fast but lossy)
+        // - A -> C (slow but lossless)
+        let mut registry = Registry::new();
+
+        // Fast path: A -> B (fast, lossy)
+        registry.register_decl(
+            ConverterDecl::simple(
+                "a-to-b-fast",
+                PropertyPattern::new().eq("format", "a"),
+                PropertyPattern::new().eq("format", "b"),
+            )
+            .cost("speed", 0.5)
+            .cost("quality_loss", 0.8),
+        );
+
+        // Fast path: B -> C (fast, lossy)
+        registry.register_decl(
+            ConverterDecl::simple(
+                "b-to-c-fast",
+                PropertyPattern::new().eq("format", "b"),
+                PropertyPattern::new().eq("format", "c"),
+            )
+            .cost("speed", 0.5)
+            .cost("quality_loss", 0.8),
+        );
+
+        // Slow path: A -> C (slow, lossless)
+        registry.register_decl(
+            ConverterDecl::simple(
+                "a-to-c-slow",
+                PropertyPattern::new().eq("format", "a"),
+                PropertyPattern::new().eq("format", "c"),
+            )
+            .cost("speed", 5.0)
+            .cost("quality_loss", 0.0),
+        );
+
+        let source = Properties::new().with("format", "a");
+        let target = PropertyPattern::new().eq("format", "c");
+
+        // Optimize for speed: should take fast 2-hop path (0.5 + 0.5 = 1.0 < 5.0)
+        let speed_plan = Planner::new(&registry)
+            .optimize(OptimizeTarget::Speed)
+            .plan(&source, &target, Cardinality::One, Cardinality::One)
+            .expect("should find plan");
+
+        assert_eq!(speed_plan.steps.len(), 2);
+        assert!(speed_plan.cost < 2.0);
+
+        // Optimize for quality: should take direct slow path (0.0 < 0.8 + 0.8)
+        let quality_plan = Planner::new(&registry)
+            .optimize(OptimizeTarget::Quality)
+            .plan(&source, &target, Cardinality::One, Cardinality::One)
+            .expect("should find plan");
+
+        assert_eq!(quality_plan.steps.len(), 1);
+        assert_eq!(quality_plan.steps[0].converter_id, "a-to-c-slow");
     }
 }

@@ -19,7 +19,7 @@ pub use executor::{
     Job, MemoryBudget, MemoryPermit, SimpleExecutor, estimate_memory,
 };
 pub use pattern::{Predicate, PropertyPattern};
-pub use planner::{Cardinality, Plan, PlanStep, Planner};
+pub use planner::{Cardinality, OptimizeTarget, Plan, PlanStep, Planner};
 pub use properties::{Properties, PropertiesExt, Value};
 pub use registry::Registry;
 pub use workflow::{Sink, Source, Step, Workflow, WorkflowError};

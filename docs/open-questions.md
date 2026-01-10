@@ -21,7 +21,7 @@ Unresolved design decisions for Cambium.
 - **Batch boundaries**: Soft-explicit based on invocation (CLI args = batch, tree = batch, recursive = batch per dir)
 - **Converter model**: Named ports with per-port cardinality (`list: bool`), inspired by ComfyUI
 - **Planning cardinality**: Inferred from source/target, tracked through graph
-- **Expression syntax**: Use Dew (`dew-core` + `dew-scalar`) for cost expressions
+- **Expression syntax**: Deferred; use `--optimize quality|speed|size` for MVP, add Dew later if needed
 
 ## Core Model
 

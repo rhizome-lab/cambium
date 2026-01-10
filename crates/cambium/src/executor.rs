@@ -115,6 +115,9 @@ pub enum ExecuteError {
 /// - `ParallelExecutor`: Parallel with memory budget (requires `parallel` feature)
 pub trait Executor: Send + Sync {
     /// Execute a single conversion plan.
+    ///
+    /// If the pipeline produces multiple outputs (expansion), returns only the first.
+    /// Use `execute_expanding` to get all outputs.
     fn execute(
         &self,
         ctx: &ExecutionContext,
@@ -122,6 +125,22 @@ pub trait Executor: Send + Sync {
         input: Vec<u8>,
         props: Properties,
     ) -> Result<ExecutionResult, ExecuteError>;
+
+    /// Execute a conversion plan with expansion support.
+    ///
+    /// When a converter produces `Multiple` outputs, each output continues
+    /// through the remaining pipeline independently. Returns all final outputs.
+    ///
+    /// Default implementation calls `execute` (single output only).
+    fn execute_expanding(
+        &self,
+        ctx: &ExecutionContext,
+        plan: &Plan,
+        input: Vec<u8>,
+        props: Properties,
+    ) -> Result<Vec<ExecutionResult>, ExecuteError> {
+        self.execute(ctx, plan, input, props).map(|r| vec![r])
+    }
 
     /// Execute a batch of independent conversion jobs.
     ///
@@ -135,6 +154,160 @@ pub trait Executor: Send + Sync {
             .map(|job| self.execute(ctx, &job.plan, job.input, job.props))
             .collect()
     }
+
+    /// Execute an aggregating conversion (N inputs → 1 output).
+    ///
+    /// The plan must contain exactly one aggregating converter (one that
+    /// implements `convert_batch`). Steps before it process each input
+    /// independently, then aggregation happens, then any remaining steps
+    /// process the single aggregated output.
+    ///
+    /// Example: files → tar (aggregate) → gzip = .tar.gz
+    ///
+    /// Default implementation runs sequentially.
+    fn execute_aggregating(
+        &self,
+        ctx: &ExecutionContext,
+        plan: &Plan,
+        inputs: Vec<(Vec<u8>, Properties)>,
+    ) -> Result<ExecutionResult, ExecuteError> {
+        if plan.steps.is_empty() {
+            return Err(ExecuteError::EmptyPlan);
+        }
+
+        let start = Instant::now();
+        let mut peak_memory = inputs.iter().map(|(d, _)| d.len()).sum::<usize>();
+
+        // Find the aggregating step (converter that implements convert_batch)
+        // For now, we assume it's specified by the caller via aggregate_step_index
+        // Default: last step that could be an aggregator (heuristic: known aggregators)
+        let aggregate_idx = find_aggregate_step_index(ctx, plan).unwrap_or(plan.steps.len() - 1);
+
+        let pre_aggregate_steps = &plan.steps[..aggregate_idx];
+        let aggregate_step = &plan.steps[aggregate_idx];
+        let post_aggregate_steps = &plan.steps[aggregate_idx + 1..];
+
+        // Phase 1: Process each input through pre-aggregation steps
+        let mut processed: Vec<(Vec<u8>, Properties)> = Vec::new();
+
+        for (input, props) in inputs {
+            let mut current_data = input;
+            let mut current_props = props;
+
+            for (step_idx, step) in pre_aggregate_steps.iter().enumerate() {
+                let converter = ctx
+                    .registry
+                    .get(&step.converter_id)
+                    .ok_or_else(|| ExecuteError::ConverterNotFound(step.converter_id.clone()))?;
+
+                let output = converter
+                    .convert(&current_data, &current_props)
+                    .map_err(|e| ExecuteError::ConversionFailed {
+                        step: step_idx,
+                        source: e,
+                    })?;
+
+                match output {
+                    crate::ConvertOutput::Single(data, props) => {
+                        peak_memory = peak_memory.max(data.len());
+                        current_data = data;
+                        current_props = props;
+                    }
+                    crate::ConvertOutput::Multiple(mut outputs) => {
+                        // For aggregation, take just the first output from expansion
+                        if let Some((data, props)) = outputs.pop() {
+                            peak_memory = peak_memory.max(data.len());
+                            current_data = data;
+                            current_props = props;
+                        }
+                    }
+                }
+            }
+
+            processed.push((current_data, current_props));
+        }
+
+        // Phase 2: Run the aggregating step
+        let aggregator = ctx
+            .registry
+            .get(&aggregate_step.converter_id)
+            .ok_or_else(|| ExecuteError::ConverterNotFound(aggregate_step.converter_id.clone()))?;
+
+        let batch_input: Vec<(&[u8], &Properties)> =
+            processed.iter().map(|(d, p)| (d.as_slice(), p)).collect();
+
+        let output =
+            aggregator
+                .convert_batch(&batch_input)
+                .map_err(|e| ExecuteError::ConversionFailed {
+                    step: aggregate_idx,
+                    source: e,
+                })?;
+
+        let (mut current_data, mut current_props) = match output {
+            crate::ConvertOutput::Single(data, props) => (data, props),
+            crate::ConvertOutput::Multiple(mut outputs) => {
+                outputs.pop().ok_or(ExecuteError::EmptyPlan)?
+            }
+        };
+
+        peak_memory = peak_memory.max(current_data.len());
+
+        // Phase 3: Process aggregated output through post-aggregation steps
+        for (rel_idx, step) in post_aggregate_steps.iter().enumerate() {
+            let step_idx = aggregate_idx + 1 + rel_idx;
+            let converter = ctx
+                .registry
+                .get(&step.converter_id)
+                .ok_or_else(|| ExecuteError::ConverterNotFound(step.converter_id.clone()))?;
+
+            let output = converter
+                .convert(&current_data, &current_props)
+                .map_err(|e| ExecuteError::ConversionFailed {
+                    step: step_idx,
+                    source: e,
+                })?;
+
+            match output {
+                crate::ConvertOutput::Single(data, props) => {
+                    peak_memory = peak_memory.max(data.len());
+                    current_data = data;
+                    current_props = props;
+                }
+                crate::ConvertOutput::Multiple(mut outputs) => {
+                    if let Some((data, props)) = outputs.pop() {
+                        peak_memory = peak_memory.max(data.len());
+                        current_data = data;
+                        current_props = props;
+                    }
+                }
+            }
+        }
+
+        Ok(ExecutionResult {
+            data: current_data,
+            props: current_props,
+            stats: ExecutionStats {
+                duration: start.elapsed(),
+                peak_memory,
+                steps_executed: plan.steps.len(),
+            },
+        })
+    }
+}
+
+/// Find the index of the aggregating step in a plan.
+///
+/// Returns the index of the first step whose converter declares a list input.
+fn find_aggregate_step_index(ctx: &ExecutionContext, plan: &Plan) -> Option<usize> {
+    for (idx, step) in plan.steps.iter().enumerate() {
+        if let Some(converter) = ctx.registry.get(&step.converter_id) {
+            if converter.decl().aggregates() {
+                return Some(idx);
+            }
+        }
+    }
+    None
 }
 
 /// Simple sequential executor with no resource limits.
@@ -158,10 +331,24 @@ impl Executor for SimpleExecutor {
         input: Vec<u8>,
         props: Properties,
     ) -> Result<ExecutionResult, ExecuteError> {
+        // Use execute_expanding and take first result
+        let mut results = self.execute_expanding(ctx, plan, input, props)?;
+        results.pop().ok_or(ExecuteError::EmptyPlan)
+    }
+
+    fn execute_expanding(
+        &self,
+        ctx: &ExecutionContext,
+        plan: &Plan,
+        input: Vec<u8>,
+        props: Properties,
+    ) -> Result<Vec<ExecutionResult>, ExecuteError> {
         let start = Instant::now();
-        let mut current_data = input;
-        let mut current_props = props;
-        let mut peak_memory = current_data.len();
+        let mut peak_memory = input.len();
+
+        // Track all items flowing through the pipeline
+        // Each item is (data, props)
+        let mut items: Vec<(Vec<u8>, Properties)> = vec![(input, props)];
 
         for (step_idx, step) in plan.steps.iter().enumerate() {
             let converter = ctx
@@ -169,38 +356,52 @@ impl Executor for SimpleExecutor {
                 .get(&step.converter_id)
                 .ok_or_else(|| ExecuteError::ConverterNotFound(step.converter_id.clone()))?;
 
-            let output = converter
-                .convert(&current_data, &current_props)
-                .map_err(|e| ExecuteError::ConversionFailed {
-                    step: step_idx,
-                    source: e,
+            let mut next_items = Vec::new();
+
+            for (data, props) in items {
+                let output = converter.convert(&data, &props).map_err(|e| {
+                    ExecuteError::ConversionFailed {
+                        step: step_idx,
+                        source: e,
+                    }
                 })?;
 
-            // Extract single output
-            let (data, props) = match output {
-                crate::ConvertOutput::Single(data, props) => (data, props),
-                crate::ConvertOutput::Multiple(mut outputs) => {
-                    // For simple execution, take first output
-                    outputs.pop().ok_or(ExecuteError::EmptyPlan)?
+                match output {
+                    crate::ConvertOutput::Single(out_data, out_props) => {
+                        peak_memory = peak_memory.max(out_data.len());
+                        next_items.push((out_data, out_props));
+                    }
+                    crate::ConvertOutput::Multiple(outputs) => {
+                        for (out_data, out_props) in outputs {
+                            peak_memory = peak_memory.max(out_data.len());
+                            next_items.push((out_data, out_props));
+                        }
+                    }
                 }
-            };
+            }
 
-            // Track peak memory
-            peak_memory = peak_memory.max(data.len());
+            if next_items.is_empty() {
+                return Err(ExecuteError::EmptyPlan);
+            }
 
-            current_data = data;
-            current_props = props;
+            items = next_items;
         }
 
-        Ok(ExecutionResult {
-            data: current_data,
-            props: current_props,
-            stats: ExecutionStats {
-                duration: start.elapsed(),
-                peak_memory,
-                steps_executed: plan.steps.len(),
-            },
-        })
+        let duration = start.elapsed();
+        let steps_executed = plan.steps.len();
+
+        Ok(items
+            .into_iter()
+            .map(|(data, props)| ExecutionResult {
+                data,
+                props,
+                stats: ExecutionStats {
+                    duration,
+                    peak_memory,
+                    steps_executed,
+                },
+            })
+            .collect())
     }
 }
 
@@ -350,6 +551,18 @@ impl Executor for BoundedExecutor {
         input: Vec<u8>,
         props: Properties,
     ) -> Result<ExecutionResult, ExecuteError> {
+        // Use execute_expanding and take first result
+        let mut results = self.execute_expanding(ctx, plan, input, props)?;
+        results.pop().ok_or(ExecuteError::EmptyPlan)
+    }
+
+    fn execute_expanding(
+        &self,
+        ctx: &ExecutionContext,
+        plan: &Plan,
+        input: Vec<u8>,
+        props: Properties,
+    ) -> Result<Vec<ExecutionResult>, ExecuteError> {
         // Check memory limit before starting
         if let Some(limit) = ctx.memory_limit {
             let estimated = estimate_memory(input.len(), plan);
@@ -361,46 +574,8 @@ impl Executor for BoundedExecutor {
             }
         }
 
-        // Delegate to simple executor for actual execution
-        let start = Instant::now();
-        let mut current_data = input;
-        let mut current_props = props;
-        let mut peak_memory = current_data.len();
-
-        for (step_idx, step) in plan.steps.iter().enumerate() {
-            let converter = ctx
-                .registry
-                .get(&step.converter_id)
-                .ok_or_else(|| ExecuteError::ConverterNotFound(step.converter_id.clone()))?;
-
-            let output = converter
-                .convert(&current_data, &current_props)
-                .map_err(|e| ExecuteError::ConversionFailed {
-                    step: step_idx,
-                    source: e,
-                })?;
-
-            let (data, props) = match output {
-                crate::ConvertOutput::Single(data, props) => (data, props),
-                crate::ConvertOutput::Multiple(mut outputs) => {
-                    outputs.pop().ok_or(ExecuteError::EmptyPlan)?
-                }
-            };
-
-            peak_memory = peak_memory.max(data.len());
-            current_data = data;
-            current_props = props;
-        }
-
-        Ok(ExecutionResult {
-            data: current_data,
-            props: current_props,
-            stats: ExecutionStats {
-                duration: start.elapsed(),
-                peak_memory,
-                steps_executed: plan.steps.len(),
-            },
-        })
+        // Delegate to SimpleExecutor for actual execution with expansion
+        SimpleExecutor::new().execute_expanding(ctx, plan, input, props)
     }
 }
 
@@ -801,5 +976,312 @@ mod tests {
 
         assert_eq!(results.len(), 3);
         assert!(results.iter().all(|r| r.is_ok()));
+    }
+
+    /// Test converter that expands one input into multiple outputs.
+    struct ExpanderConverter {
+        decl: ConverterDecl,
+        expand_to: usize,
+        output_format: &'static str,
+    }
+
+    impl ExpanderConverter {
+        fn new(input: &'static str, output: &'static str, expand_to: usize) -> Self {
+            let decl = ConverterDecl::simple(
+                "test.expander",
+                PropertyPattern::new().eq("format", input),
+                PropertyPattern::new().eq("format", output),
+            );
+            Self {
+                decl,
+                expand_to,
+                output_format: output,
+            }
+        }
+    }
+
+    impl Converter for ExpanderConverter {
+        fn decl(&self) -> &ConverterDecl {
+            &self.decl
+        }
+
+        fn convert(
+            &self,
+            input: &[u8],
+            _props: &Properties,
+        ) -> Result<ConvertOutput, ConvertError> {
+            // Expand input into N outputs, each with part of the data
+            let outputs: Vec<(Vec<u8>, Properties)> = (0..self.expand_to)
+                .map(|i| {
+                    let data = format!("{}:part{}", String::from_utf8_lossy(input), i);
+                    let props = Properties::new()
+                        .with("format", self.output_format)
+                        .with("index", i as i64);
+                    (data.into_bytes(), props)
+                })
+                .collect();
+
+            Ok(ConvertOutput::Multiple(outputs))
+        }
+    }
+
+    #[test]
+    fn test_execute_expanding_single_step() {
+        let mut registry = Registry::new();
+        registry.register(ExpanderConverter::new("archive", "file", 3));
+
+        let ctx = ExecutionContext::new(Arc::new(registry));
+
+        let plan = Plan {
+            steps: vec![crate::PlanStep {
+                converter_id: "test.expander".into(),
+                input_port: "in".into(),
+                output_port: "out".into(),
+                output_properties: Properties::new().with("format", "file"),
+            }],
+            cost: 1.0,
+        };
+
+        let executor = SimpleExecutor::new();
+        let input = b"content".to_vec();
+        let props = Properties::new().with("format", "archive");
+
+        let results = executor
+            .execute_expanding(&ctx, &plan, input, props)
+            .expect("should succeed");
+
+        // Should produce 3 outputs
+        assert_eq!(results.len(), 3);
+
+        // Each output should have the expanded content
+        for (i, result) in results.iter().enumerate() {
+            let content = String::from_utf8_lossy(&result.data);
+            assert!(content.contains(&format!("part{}", i)));
+            assert_eq!(result.props.get("index").unwrap().as_i64(), Some(i as i64));
+        }
+    }
+
+    #[test]
+    fn test_execute_expanding_chain() {
+        // Test: expander -> identity (should process each expanded item)
+        let mut registry = Registry::new();
+        registry.register(ExpanderConverter::new("archive", "raw", 2));
+        registry.register(IdentityConverter::new("raw", "processed"));
+
+        let ctx = ExecutionContext::new(Arc::new(registry));
+
+        let plan = Plan {
+            steps: vec![
+                crate::PlanStep {
+                    converter_id: "test.expander".into(),
+                    input_port: "in".into(),
+                    output_port: "out".into(),
+                    output_properties: Properties::new().with("format", "raw"),
+                },
+                crate::PlanStep {
+                    converter_id: "test.raw-to-processed".into(),
+                    input_port: "in".into(),
+                    output_port: "out".into(),
+                    output_properties: Properties::new().with("format", "processed"),
+                },
+            ],
+            cost: 2.0,
+        };
+
+        let executor = SimpleExecutor::new();
+        let input = b"data".to_vec();
+        let props = Properties::new().with("format", "archive");
+
+        let results = executor
+            .execute_expanding(&ctx, &plan, input, props)
+            .expect("should succeed");
+
+        // Should still have 2 outputs (expansion preserved through chain)
+        assert_eq!(results.len(), 2);
+
+        // Each should have been processed (format changed)
+        for result in &results {
+            assert_eq!(
+                result.props.get("format").unwrap().as_str(),
+                Some("processed")
+            );
+        }
+    }
+
+    #[test]
+    fn test_execute_single_still_works() {
+        // Verify that execute() still works and returns first result
+        let mut registry = Registry::new();
+        registry.register(ExpanderConverter::new("archive", "file", 3));
+
+        let ctx = ExecutionContext::new(Arc::new(registry));
+
+        let plan = Plan {
+            steps: vec![crate::PlanStep {
+                converter_id: "test.expander".into(),
+                input_port: "in".into(),
+                output_port: "out".into(),
+                output_properties: Properties::new().with("format", "file"),
+            }],
+            cost: 1.0,
+        };
+
+        let executor = SimpleExecutor::new();
+        let input = b"content".to_vec();
+        let props = Properties::new().with("format", "archive");
+
+        // execute() should return single result (last one due to pop())
+        let result = executor
+            .execute(&ctx, &plan, input, props)
+            .expect("should succeed");
+
+        assert_eq!(result.props.get("format").unwrap().as_str(), Some("file"));
+    }
+
+    /// Test converter that aggregates multiple inputs into one output.
+    struct AggregatorConverter {
+        decl: ConverterDecl,
+    }
+
+    impl AggregatorConverter {
+        fn new() -> Self {
+            let decl = ConverterDecl::simple(
+                "test.aggregator",
+                PropertyPattern::new().eq("format", "item"),
+                PropertyPattern::new().eq("format", "bundle"),
+            );
+            Self { decl }
+        }
+    }
+
+    impl Converter for AggregatorConverter {
+        fn decl(&self) -> &ConverterDecl {
+            &self.decl
+        }
+
+        fn convert(
+            &self,
+            _input: &[u8],
+            _props: &Properties,
+        ) -> Result<ConvertOutput, ConvertError> {
+            // Single convert not supported for aggregator
+            Err(ConvertError::BatchNotSupported)
+        }
+
+        fn convert_batch(
+            &self,
+            inputs: &[(&[u8], &Properties)],
+        ) -> Result<ConvertOutput, ConvertError> {
+            // Concatenate all inputs with separator
+            let combined: Vec<u8> = inputs
+                .iter()
+                .map(|(data, _)| String::from_utf8_lossy(data))
+                .collect::<Vec<_>>()
+                .join("|")
+                .into_bytes();
+
+            let props = Properties::new()
+                .with("format", "bundle")
+                .with("count", inputs.len() as i64);
+
+            Ok(ConvertOutput::Single(combined, props))
+        }
+    }
+
+    #[test]
+    fn test_execute_aggregating_simple() {
+        let mut registry = Registry::new();
+        registry.register(AggregatorConverter::new());
+
+        let ctx = ExecutionContext::new(Arc::new(registry));
+
+        let plan = Plan {
+            steps: vec![crate::PlanStep {
+                converter_id: "test.aggregator".into(),
+                input_port: "in".into(),
+                output_port: "out".into(),
+                output_properties: Properties::new().with("format", "bundle"),
+            }],
+            cost: 1.0,
+        };
+
+        let inputs = vec![
+            (b"one".to_vec(), Properties::new().with("format", "item")),
+            (b"two".to_vec(), Properties::new().with("format", "item")),
+            (b"three".to_vec(), Properties::new().with("format", "item")),
+        ];
+
+        let executor = SimpleExecutor::new();
+        let result = executor
+            .execute_aggregating(&ctx, &plan, inputs)
+            .expect("should succeed");
+
+        // Should combine all inputs
+        let combined = String::from_utf8_lossy(&result.data);
+        assert_eq!(combined, "one|two|three");
+
+        assert_eq!(result.props.get("format").unwrap().as_str(), Some("bundle"));
+        assert_eq!(result.props.get("count").unwrap().as_i64(), Some(3));
+    }
+
+    #[test]
+    fn test_execute_aggregating_with_preprocessing() {
+        // Test: identity -> aggregator (preprocess each input before aggregating)
+        let mut registry = Registry::new();
+        registry.register(IdentityConverter::new("raw", "item"));
+        registry.register(AggregatorConverter::new());
+
+        let ctx = ExecutionContext::new(Arc::new(registry));
+
+        let plan = Plan {
+            steps: vec![
+                crate::PlanStep {
+                    converter_id: "test.raw-to-item".into(),
+                    input_port: "in".into(),
+                    output_port: "out".into(),
+                    output_properties: Properties::new().with("format", "item"),
+                },
+                crate::PlanStep {
+                    converter_id: "test.aggregator".into(),
+                    input_port: "in".into(),
+                    output_port: "out".into(),
+                    output_properties: Properties::new().with("format", "bundle"),
+                },
+            ],
+            cost: 2.0,
+        };
+
+        let inputs = vec![
+            (b"a".to_vec(), Properties::new().with("format", "raw")),
+            (b"b".to_vec(), Properties::new().with("format", "raw")),
+        ];
+
+        let executor = SimpleExecutor::new();
+        let result = executor
+            .execute_aggregating(&ctx, &plan, inputs)
+            .expect("should succeed");
+
+        // Each input was processed through identity, then aggregated
+        let combined = String::from_utf8_lossy(&result.data);
+        assert_eq!(combined, "a|b");
+        assert_eq!(result.props.get("count").unwrap().as_i64(), Some(2));
+    }
+
+    #[test]
+    fn test_execute_aggregating_empty_plan() {
+        let registry = Registry::new();
+        let ctx = ExecutionContext::new(Arc::new(registry));
+
+        let plan = Plan {
+            steps: vec![],
+            cost: 0.0,
+        };
+
+        let inputs = vec![(b"one".to_vec(), Properties::new().with("format", "item"))];
+
+        let executor = SimpleExecutor::new();
+        let result = executor.execute_aggregating(&ctx, &plan, inputs);
+
+        assert!(matches!(result, Err(ExecuteError::EmptyPlan)));
     }
 }
