@@ -4,8 +4,8 @@
 
 ### Trivial (pure Rust, minimal code)
 
-- [ ] **Base64/Hex encoding** - `base64`, `hex` crates; encode/decode bytes
-- [ ] **NDJSON/JSON Lines** - split lines + existing serde_json; streaming-friendly
+- [x] **Base64/Hex encoding** - `base64`, `hex` crates; encode/decode bytes
+- [x] **NDJSON/JSON Lines** - split lines + existing serde_json; streaming-friendly
 
 ### Simple (pure Rust, self-contained)
 

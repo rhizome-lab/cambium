@@ -46,6 +46,9 @@ qs = ["dep:serde_qs"]
 # CSV - Comma-separated values (limited: arrays of flat objects)
 csv = ["dep:csv"]
 
+# NDJSON - Newline-delimited JSON (JSON Lines)
+ndjson = ["dep:serde_json"]
+
 # ============================================
 # BINARY FORMATS (compact/efficient)
 # ============================================
@@ -77,12 +80,23 @@ pickle = ["dep:serde-pickle"]
 # Property List - Apple's plist format
 plist = ["dep:plist"]
 
-# All serde formats
+# ============================================
+# ENCODING FORMATS (byte representations)
+# ============================================
+
+# Base64 - Binary-to-text encoding
+base64 = ["dep:base64"]
+
+# Hex - Hexadecimal encoding
+hex = ["dep:hex"]
+
+# All formats
 all = [
     "json", "yaml", "toml", "ron", "json5", "xml", "lexpr",
-    "urlencoded", "qs", "csv",
+    "urlencoded", "qs", "csv", "ndjson",
     "msgpack", "cbor", "bincode", "postcard", "bson",
     "flexbuffers", "bencode", "pickle", "plist",
+    "base64", "hex",
 ]
 
 [dependencies]
@@ -111,3 +125,7 @@ flexbuffers = { version = "25", optional = true }
 serde_bencode = { version = "0.2", optional = true }
 serde-pickle = { version = "1.1", optional = true }
 plist = { version = "1.7", optional = true }
+
+# --- Encoding formats ---
+base64 = { version = "0.22", optional = true }
+hex = { version = "0.4", optional = true }

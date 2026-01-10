@@ -246,3 +246,17 @@ Design principle: if something feels like a special case, generalize it.
 - "Suggest" → just `plan` on incomplete workflow
 
 One model, many uses.
+
+## Prior Art & Inspiration
+
+Tools that informed Cambium's design:
+
+| Tool | What It Does | What We Take |
+|------|--------------|--------------|
+| **[CyberChef](https://github.com/gchq/CyberChef)** | "Cyber Swiss Army Knife" - browser-based encoding, compression, hashing, data analysis | Recipe-based pipelines, comprehensive format coverage, "bake" metaphor |
+| **[Pandoc](https://pandoc.org)** | Universal document converter | Format graph traversal, intermediate representation idea |
+| **[FFmpeg](https://ffmpeg.org)** | Media transcoding | Filter graphs, format negotiation |
+| **[ImageMagick](https://imagemagick.org)** | Image manipulation | Batch processing, format detection |
+| **[jq](https://jqlang.github.io/jq/)** | JSON processor | Streaming, composable transformations |
+
+**Key difference:** These tools are format-specific or monolithic. Cambium is a **unified orchestrator** - one interface that routes to the right tool for each conversion.

@@ -28,8 +28,15 @@
 //! - `pickle` - Python's serialization format
 //! - `plist` - Apple Property List
 //!
+//! ## Encoding formats (byte representations)
+//! - `base64` - Base64 encoding/decoding
+//! - `hex` - Hexadecimal encoding/decoding
+//!
+//! ## Line-based formats
+//! - `ndjson` - Newline-delimited JSON (JSON Lines)
+//!
 //! ## Feature group
-//! - `all` - All serde formats
+//! - `all` - All formats
 
 use cambium::{
     ConvertError, ConvertOutput, Converter, ConverterDecl, Properties, PropertyPattern, Registry,
@@ -46,6 +53,25 @@ pub fn register_all(registry: &mut Registry) {
                 registry.register(SerdeConverter::new(from, to));
             }
         }
+    }
+
+    // Register encoding converters (base64, hex)
+    #[cfg(feature = "base64")]
+    {
+        registry.register(Base64Encoder);
+        registry.register(Base64Decoder);
+    }
+    #[cfg(feature = "hex")]
+    {
+        registry.register(HexEncoder);
+        registry.register(HexDecoder);
+    }
+
+    // Register NDJSON converters
+    #[cfg(feature = "ndjson")]
+    {
+        registry.register(JsonToNdjson);
+        registry.register(NdjsonToJson);
     }
 }
 
@@ -140,6 +166,235 @@ impl Converter for SerdeConverter {
         Ok(ConvertOutput::Single(output, out_props))
     }
 }
+
+// ============================================
+// Base64 encoding/decoding
+// ============================================
+
+#[cfg(feature = "base64")]
+mod base64_impl {
+    use super::*;
+    use base64::prelude::*;
+
+    /// Encode raw bytes to base64 text.
+    pub struct Base64Encoder;
+
+    impl Converter for Base64Encoder {
+        fn decl(&self) -> &ConverterDecl {
+            static DECL: std::sync::OnceLock<ConverterDecl> = std::sync::OnceLock::new();
+            DECL.get_or_init(|| {
+                ConverterDecl::simple(
+                    "encoding.raw-to-base64",
+                    PropertyPattern::new().eq("format", "raw"),
+                    PropertyPattern::new().eq("format", "base64"),
+                )
+                .description("Encode raw bytes to base64")
+            })
+        }
+
+        fn convert(&self, input: &[u8], props: &Properties) -> Result<ConvertOutput, ConvertError> {
+            let encoded = BASE64_STANDARD.encode(input);
+            let mut out_props = props.clone();
+            out_props.insert("format".into(), "base64".into());
+            Ok(ConvertOutput::Single(encoded.into_bytes(), out_props))
+        }
+    }
+
+    /// Decode base64 text to raw bytes.
+    pub struct Base64Decoder;
+
+    impl Converter for Base64Decoder {
+        fn decl(&self) -> &ConverterDecl {
+            static DECL: std::sync::OnceLock<ConverterDecl> = std::sync::OnceLock::new();
+            DECL.get_or_init(|| {
+                ConverterDecl::simple(
+                    "encoding.base64-to-raw",
+                    PropertyPattern::new().eq("format", "base64"),
+                    PropertyPattern::new().eq("format", "raw"),
+                )
+                .description("Decode base64 to raw bytes")
+            })
+        }
+
+        fn convert(&self, input: &[u8], props: &Properties) -> Result<ConvertOutput, ConvertError> {
+            // Handle input as text (trim whitespace)
+            let text = std::str::from_utf8(input)
+                .map_err(|e| ConvertError::InvalidInput(format!("Invalid UTF-8: {}", e)))?
+                .trim();
+            let decoded = BASE64_STANDARD
+                .decode(text)
+                .map_err(|e| ConvertError::InvalidInput(format!("Invalid base64: {}", e)))?;
+            let mut out_props = props.clone();
+            out_props.insert("format".into(), "raw".into());
+            Ok(ConvertOutput::Single(decoded, out_props))
+        }
+    }
+}
+
+#[cfg(feature = "base64")]
+pub use base64_impl::{Base64Decoder, Base64Encoder};
+
+// ============================================
+// Hex encoding/decoding
+// ============================================
+
+#[cfg(feature = "hex")]
+mod hex_impl {
+    use super::*;
+
+    /// Encode raw bytes to hexadecimal text.
+    pub struct HexEncoder;
+
+    impl Converter for HexEncoder {
+        fn decl(&self) -> &ConverterDecl {
+            static DECL: std::sync::OnceLock<ConverterDecl> = std::sync::OnceLock::new();
+            DECL.get_or_init(|| {
+                ConverterDecl::simple(
+                    "encoding.raw-to-hex",
+                    PropertyPattern::new().eq("format", "raw"),
+                    PropertyPattern::new().eq("format", "hex"),
+                )
+                .description("Encode raw bytes to hexadecimal")
+            })
+        }
+
+        fn convert(&self, input: &[u8], props: &Properties) -> Result<ConvertOutput, ConvertError> {
+            let encoded = hex::encode(input);
+            let mut out_props = props.clone();
+            out_props.insert("format".into(), "hex".into());
+            Ok(ConvertOutput::Single(encoded.into_bytes(), out_props))
+        }
+    }
+
+    /// Decode hexadecimal text to raw bytes.
+    pub struct HexDecoder;
+
+    impl Converter for HexDecoder {
+        fn decl(&self) -> &ConverterDecl {
+            static DECL: std::sync::OnceLock<ConverterDecl> = std::sync::OnceLock::new();
+            DECL.get_or_init(|| {
+                ConverterDecl::simple(
+                    "encoding.hex-to-raw",
+                    PropertyPattern::new().eq("format", "hex"),
+                    PropertyPattern::new().eq("format", "raw"),
+                )
+                .description("Decode hexadecimal to raw bytes")
+            })
+        }
+
+        fn convert(&self, input: &[u8], props: &Properties) -> Result<ConvertOutput, ConvertError> {
+            // Handle input as text (trim whitespace, remove common separators)
+            let text = std::str::from_utf8(input)
+                .map_err(|e| ConvertError::InvalidInput(format!("Invalid UTF-8: {}", e)))?
+                .trim()
+                .replace([' ', ':', '-'], "");
+            let decoded = hex::decode(&text)
+                .map_err(|e| ConvertError::InvalidInput(format!("Invalid hex: {}", e)))?;
+            let mut out_props = props.clone();
+            out_props.insert("format".into(), "raw".into());
+            Ok(ConvertOutput::Single(decoded, out_props))
+        }
+    }
+}
+
+#[cfg(feature = "hex")]
+pub use hex_impl::{HexDecoder, HexEncoder};
+
+// ============================================
+// NDJSON (Newline-delimited JSON)
+// ============================================
+
+#[cfg(feature = "ndjson")]
+mod ndjson_impl {
+    use super::*;
+
+    /// Convert JSON array to newline-delimited JSON.
+    pub struct JsonToNdjson;
+
+    impl Converter for JsonToNdjson {
+        fn decl(&self) -> &ConverterDecl {
+            static DECL: std::sync::OnceLock<ConverterDecl> = std::sync::OnceLock::new();
+            DECL.get_or_init(|| {
+                ConverterDecl::simple(
+                    "serde.json-to-ndjson",
+                    PropertyPattern::new().eq("format", "json"),
+                    PropertyPattern::new().eq("format", "ndjson"),
+                )
+                .description("Convert JSON array to newline-delimited JSON")
+            })
+        }
+
+        fn convert(&self, input: &[u8], props: &Properties) -> Result<ConvertOutput, ConvertError> {
+            let value: serde_json::Value = serde_json::from_slice(input)
+                .map_err(|e| ConvertError::InvalidInput(format!("Invalid JSON: {}", e)))?;
+
+            let array = value
+                .as_array()
+                .ok_or_else(|| ConvertError::InvalidInput("JSON must be an array".into()))?;
+
+            let mut output = Vec::new();
+            for item in array {
+                serde_json::to_writer(&mut output, item).map_err(|e| {
+                    ConvertError::Failed(format!("JSON serialization failed: {}", e))
+                })?;
+                output.push(b'\n');
+            }
+
+            let mut out_props = props.clone();
+            out_props.insert("format".into(), "ndjson".into());
+            Ok(ConvertOutput::Single(output, out_props))
+        }
+    }
+
+    /// Convert newline-delimited JSON to JSON array.
+    pub struct NdjsonToJson;
+
+    impl Converter for NdjsonToJson {
+        fn decl(&self) -> &ConverterDecl {
+            static DECL: std::sync::OnceLock<ConverterDecl> = std::sync::OnceLock::new();
+            DECL.get_or_init(|| {
+                ConverterDecl::simple(
+                    "serde.ndjson-to-json",
+                    PropertyPattern::new().eq("format", "ndjson"),
+                    PropertyPattern::new().eq("format", "json"),
+                )
+                .description("Convert newline-delimited JSON to JSON array")
+            })
+        }
+
+        fn convert(&self, input: &[u8], props: &Properties) -> Result<ConvertOutput, ConvertError> {
+            let text = std::str::from_utf8(input)
+                .map_err(|e| ConvertError::InvalidInput(format!("Invalid UTF-8: {}", e)))?;
+
+            let mut items = Vec::new();
+            for (line_num, line) in text.lines().enumerate() {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+                let item: serde_json::Value = serde_json::from_str(line).map_err(|e| {
+                    ConvertError::InvalidInput(format!(
+                        "Invalid JSON at line {}: {}",
+                        line_num + 1,
+                        e
+                    ))
+                })?;
+                items.push(item);
+            }
+
+            let array = serde_json::Value::Array(items);
+            let output = serde_json::to_vec_pretty(&array)
+                .map_err(|e| ConvertError::Failed(format!("JSON serialization failed: {}", e)))?;
+
+            let mut out_props = props.clone();
+            out_props.insert("format".into(), "json".into());
+            Ok(ConvertOutput::Single(output, out_props))
+        }
+    }
+}
+
+#[cfg(feature = "ndjson")]
+pub use ndjson_impl::{JsonToNdjson, NdjsonToJson};
 
 /// Deserialize bytes to a serde Value.
 fn deserialize(format: &str, data: &[u8]) -> Result<serde_json::Value, ConvertError> {
@@ -429,9 +684,142 @@ mod tests {
         let mut registry = Registry::new();
         register_all(&mut registry);
 
-        // Should have n*(n-1) converters for n formats
+        // Should have n*(n-1) serde converters for n formats
         let n = enabled_formats().len();
-        assert_eq!(registry.len(), n * (n - 1));
+        let mut expected = n * (n - 1);
+
+        // Plus encoding converters
+        #[cfg(feature = "base64")]
+        {
+            expected += 2;
+        }
+        #[cfg(feature = "hex")]
+        {
+            expected += 2;
+        }
+        #[cfg(feature = "ndjson")]
+        {
+            expected += 2;
+        }
+
+        assert_eq!(registry.len(), expected);
+    }
+
+    #[test]
+    #[cfg(feature = "base64")]
+    fn test_base64_roundtrip() {
+        use crate::{Base64Decoder, Base64Encoder};
+
+        let original = b"Hello, World! \x00\x01\x02\xff";
+        let props = Properties::new().with("format", "raw");
+
+        // Encode
+        let encoded_result = Base64Encoder.convert(original, &props).unwrap();
+        let (encoded, encoded_props) = match encoded_result {
+            ConvertOutput::Single(b, p) => (b, p),
+            _ => panic!("Expected single"),
+        };
+        assert_eq!(
+            encoded_props.get("format").unwrap().as_str(),
+            Some("base64")
+        );
+        assert_eq!(
+            String::from_utf8(encoded.clone()).unwrap(),
+            "SGVsbG8sIFdvcmxkISAAAQL/"
+        );
+
+        // Decode
+        let decoded_result = Base64Decoder.convert(&encoded, &encoded_props).unwrap();
+        let (decoded, _) = match decoded_result {
+            ConvertOutput::Single(b, p) => (b, p),
+            _ => panic!("Expected single"),
+        };
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    #[cfg(feature = "hex")]
+    fn test_hex_roundtrip() {
+        use crate::{HexDecoder, HexEncoder};
+
+        let original = b"\xde\xad\xbe\xef";
+        let props = Properties::new().with("format", "raw");
+
+        // Encode
+        let encoded_result = HexEncoder.convert(original, &props).unwrap();
+        let (encoded, encoded_props) = match encoded_result {
+            ConvertOutput::Single(b, p) => (b, p),
+            _ => panic!("Expected single"),
+        };
+        assert_eq!(encoded_props.get("format").unwrap().as_str(), Some("hex"));
+        assert_eq!(String::from_utf8(encoded.clone()).unwrap(), "deadbeef");
+
+        // Decode
+        let decoded_result = HexDecoder.convert(&encoded, &encoded_props).unwrap();
+        let (decoded, _) = match decoded_result {
+            ConvertOutput::Single(b, p) => (b, p),
+            _ => panic!("Expected single"),
+        };
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    #[cfg(feature = "hex")]
+    fn test_hex_with_separators() {
+        use crate::HexDecoder;
+
+        // Hex with various separators
+        let input = b"de:ad:be:ef";
+        let props = Properties::new().with("format", "hex");
+
+        let result = HexDecoder.convert(input, &props).unwrap();
+        let (decoded, _) = match result {
+            ConvertOutput::Single(b, p) => (b, p),
+            _ => panic!("Expected single"),
+        };
+        assert_eq!(decoded, b"\xde\xad\xbe\xef");
+    }
+
+    #[test]
+    #[cfg(feature = "ndjson")]
+    fn test_json_to_ndjson() {
+        use crate::JsonToNdjson;
+
+        let input = br#"[{"a": 1}, {"b": 2}, {"c": 3}]"#;
+        let props = Properties::new().with("format", "json");
+
+        let result = JsonToNdjson.convert(input, &props).unwrap();
+        let (output, out_props) = match result {
+            ConvertOutput::Single(b, p) => (b, p),
+            _ => panic!("Expected single"),
+        };
+
+        let output_str = String::from_utf8(output).unwrap();
+        assert_eq!(out_props.get("format").unwrap().as_str(), Some("ndjson"));
+        assert!(output_str.contains(r#"{"a":1}"#));
+        assert!(output_str.contains(r#"{"b":2}"#));
+        assert!(output_str.contains(r#"{"c":3}"#));
+        assert_eq!(output_str.lines().count(), 3);
+    }
+
+    #[test]
+    #[cfg(feature = "ndjson")]
+    fn test_ndjson_to_json() {
+        use crate::NdjsonToJson;
+
+        let input = b"{\"a\": 1}\n{\"b\": 2}\n{\"c\": 3}\n";
+        let props = Properties::new().with("format", "ndjson");
+
+        let result = NdjsonToJson.convert(input, &props).unwrap();
+        let (output, out_props) = match result {
+            ConvertOutput::Single(b, p) => (b, p),
+            _ => panic!("Expected single"),
+        };
+
+        let value: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(out_props.get("format").unwrap().as_str(), Some("json"));
+        assert!(value.is_array());
+        assert_eq!(value.as_array().unwrap().len(), 3);
     }
 
     #[test]
