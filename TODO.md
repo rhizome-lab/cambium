@@ -1,5 +1,34 @@
 # Cambium TODO
 
+## Format Conversions (queued simplest → most complex)
+
+### Trivial (pure Rust, minimal code)
+
+- [ ] **Base64/Hex encoding** - `base64`, `hex` crates; encode/decode bytes
+- [ ] **NDJSON/JSON Lines** - split lines + existing serde_json; streaming-friendly
+
+### Simple (pure Rust, self-contained)
+
+- [ ] **Compression** - gzip (`flate2`), zstd, brotli, xz (`xz2`); wrap/unwrap bytes
+- [ ] **INI/dotenv config** - `rust-ini`, `dotenvy`; simple key-value formats
+- [ ] **Character encoding** - `encoding_rs`; UTF-16, Latin-1, Shift-JIS, etc.
+
+### Medium (pure Rust, more logic)
+
+- [ ] **Markdown → HTML** - `pulldown-cmark`; CommonMark compliant
+- [ ] **HTML → text** - `html2text` or `scraper`; strip tags, preserve structure
+- [ ] **Archives** - `tar`, `zip` crates; extract/create, maps to Multi output
+
+### Complex (schema-based or native deps)
+
+- [ ] **Spreadsheets** - `calamine` for XLSX/ODS/XLS reading (read-only)
+- [ ] **Protobuf** - `prost`; requires .proto schema files
+- [ ] **Cap'n Proto** - `capnp`; zero-copy, requires .capnp schema files
+- [ ] **Avro** - `apache-avro`; schema embedded in data, good for streaming
+- [ ] **Parquet** - `parquet`; columnar format, complex but powerful for analytics
+
+---
+
 ## Document Conversion (cambium-document)
 
 Thin integration with a document IR library (separate project).
