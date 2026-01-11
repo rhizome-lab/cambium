@@ -156,6 +156,18 @@ Future work:
 - [ ] **Benchmarks** - criterion benchmarks for regression tracking
 - [ ] **Preserve directory structure** - mirror input tree to output tree
 
+## Complexity Hotspots (threshold >21)
+- [ ] `crates/cambium-cli/src/main.rs:detect_format` (44)
+- [ ] `crates/cambium-audio/src/lib.rs:convert_to_i16` (40)
+- [ ] `crates/cambium-cli/src/main.rs:convert_single_file` (38)
+- [ ] `crates/cambium-image/src/lib.rs:compute_resize_dimensions` (30)
+- [ ] `crates/cambium-cli/src/main.rs:mime_to_format` (29)
+- [ ] `crates/cambium-serde/src/lib.rs:avro_impl.avro_value_to_json` (28)
+- [ ] `crates/cambium-image/src/lib.rs:composite_with_opacity` (27)
+- [ ] `crates/cambium-cli/src/main.rs:cmd_plan_workflow` (21)
+- [ ] `crates/cambium-serde/src/lib.rs:deserialize` (21)
+- [ ] `crates/cambium-serde/src/lib.rs:serialize` (21)
+
 ## Distribution
 
 Implemented:
