@@ -28,6 +28,20 @@ From ecosystem-wide session analysis:
 - **Name for purpose:** Avoid names that describe one consumer
 - **Verify before stating:** Don't assert API behavior or codebase facts without checking
 
+## Commit Convention
+
+Use conventional commits: `type(scope): message`
+
+Types:
+- `feat` - New feature
+- `fix` - Bug fix
+- `refactor` - Code change that neither fixes a bug nor adds a feature
+- `docs` - Documentation only
+- `chore` - Maintenance (deps, CI, etc.)
+- `test` - Adding or updating tests
+
+Scope is optional but recommended for multi-crate repos.
+
 ## Negative Constraints
 
 Do not:
