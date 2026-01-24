@@ -1,4 +1,4 @@
-# Cambium TODO
+# Paraphase TODO
 
 ## Format Conversions (queued simplest → most complex)
 
@@ -34,7 +34,7 @@ These formats require schema files to decode - not "point and shoot":
 
 ---
 
-## Document Conversion (cambium-document)
+## Document Conversion (paraphase-document)
 
 Thin integration with a document IR library (separate project).
 
@@ -47,12 +47,12 @@ See `docs/document-ir-spec.md` for comprehensive spec of the document IR:
 
 **The document IR is out of Cambium's scope** - it's a standalone library project.
 
-cambium-document will:
+paraphase-document will:
 - [ ] Integrate with document IR library (once it exists)
 - [ ] Register format converters with Cambium registry
 - [ ] Route document conversions through Cambium's executor
 
-## Audio Encoders (cambium-audio)
+## Audio Encoders (paraphase-audio)
 
 Currently only WAV encoding is supported. Adding encoders for other formats:
 
@@ -62,7 +62,7 @@ Currently only WAV encoding is supported. Adding encoders for other formats:
 - [ ] **AAC encoder** - requires FFmpeg or native lib
 - [ ] **Opus encoder** - consider as modern alternative to OGG
 
-## Video (cambium-video)
+## Video (paraphase-video)
 
 - [ ] Complete frame encoding pipeline (currently scaffold)
 - [ ] Audio track passthrough/transcoding
@@ -84,17 +84,17 @@ Future work:
 ## CLI Usability
 
 Implemented:
-- [x] **Shell completions** - `cambium completions bash/zsh/fish`
-- [x] **Man pages** - `cambium manpage > cambium.1`
+- [x] **Shell completions** - `paraphase completions bash/zsh/fish`
+- [x] **Man pages** - `paraphase manpage > paraphase.1`
 - [x] **Verbose/quiet modes** - `-v` for debug info, `-q` for silent
 - [x] **Better format detection** - magic bytes before extension fallback
-- [x] **Stdin/stdout piping** - `cat file.mp3 | cambium convert - -o - --from mp3 --to wav`
-- [x] **Batch processing** - `cambium convert *.mp3 --output-dir out/ --to wav`
+- [x] **Stdin/stdout piping** - `cat file.mp3 | paraphase convert - -o - --from mp3 --to wav`
+- [x] **Batch processing** - `paraphase convert *.mp3 --output-dir out/ --to wav`
 - [x] **Progress reporting** - progress bars for batch conversions
 
 Implemented:
 - [x] **Presets** - `--preset web` for common conversion profiles
-- [x] **Config file** - `~/.config/cambium/config.toml` for defaults
+- [x] **Config file** - `~/.config/paraphase/config.toml` for defaults
 - [x] **Dynamic presets** - Dew expressions in preset values (requires `dew` feature)
 
 Implemented:
@@ -106,7 +106,7 @@ Implemented:
 With the `dew` feature enabled, preset numeric values can be expressions:
 
 ```toml
-# ~/.config/cambium/config.toml
+# ~/.config/paraphase/config.toml
 [preset.smart-web]
 max_width = "min(width, 1920)"
 max_height = "min(height, 1080)"
@@ -127,7 +127,7 @@ Expressions use [Dew](https://github.com/rhi-zone/dew) syntax with standard math
 - Math: `min`, `max`, `clamp`, `abs`, `sqrt`, `pow`
 - Conditionals: `if ... then ... else ...`
 
-Build with expressions: `cargo build -p cambium-cli --features dew`
+Build with expressions: `cargo build -p paraphase-cli --features dew`
 
 ## Testing & Quality
 
@@ -145,7 +145,7 @@ Implemented:
 - [x] **Expansion executor** - `execute_expanding()` properly fans out 1→N through pipeline
 - [x] **Aggregation executor** - `execute_aggregating()` for N→1 conversions (files → archive)
 - [x] **Compound archives** - `tar.gz`, `tar.zst`, `tgz` with post-aggregation compression
-- [x] **Glob support** - `cambium convert "*.json" --to yaml`
+- [x] **Glob support** - `paraphase convert "*.json" --to yaml`
 - [x] **Directory recursion** - `-r/--recursive` for tree traversal
 - [x] **Batch modes** - `--batch-mode all|per-dir` for different grouping strategies
 
@@ -157,21 +157,21 @@ Future work:
 - [ ] **Preserve directory structure** - mirror input tree to output tree
 
 ## Complexity Hotspots (threshold >21)
-- [ ] `crates/cambium-cli/src/main.rs:detect_format` (44)
-- [ ] `crates/cambium-audio/src/lib.rs:convert_to_i16` (40)
-- [ ] `crates/cambium-cli/src/main.rs:convert_single_file` (38)
-- [ ] `crates/cambium-image/src/lib.rs:compute_resize_dimensions` (30)
-- [ ] `crates/cambium-cli/src/main.rs:mime_to_format` (29)
-- [ ] `crates/cambium-serde/src/lib.rs:avro_impl.avro_value_to_json` (28)
-- [ ] `crates/cambium-image/src/lib.rs:composite_with_opacity` (27)
-- [ ] `crates/cambium-cli/src/main.rs:cmd_plan_workflow` (21)
-- [ ] `crates/cambium-serde/src/lib.rs:deserialize` (21)
-- [ ] `crates/cambium-serde/src/lib.rs:serialize` (21)
+- [ ] `crates/paraphase-cli/src/main.rs:detect_format` (44)
+- [ ] `crates/paraphase-audio/src/lib.rs:convert_to_i16` (40)
+- [ ] `crates/paraphase-cli/src/main.rs:convert_single_file` (38)
+- [ ] `crates/paraphase-image/src/lib.rs:compute_resize_dimensions` (30)
+- [ ] `crates/paraphase-cli/src/main.rs:mime_to_format` (29)
+- [ ] `crates/paraphase-serde/src/lib.rs:avro_impl.avro_value_to_json` (28)
+- [ ] `crates/paraphase-image/src/lib.rs:composite_with_opacity` (27)
+- [ ] `crates/paraphase-cli/src/main.rs:cmd_plan_workflow` (21)
+- [ ] `crates/paraphase-serde/src/lib.rs:deserialize` (21)
+- [ ] `crates/paraphase-serde/src/lib.rs:serialize` (21)
 
 ## Distribution
 
 Implemented:
-- [x] **Man pages** - via `cambium manpage` command
+- [x] **Man pages** - via `paraphase manpage` command
 
 Deferred (needs ecosystem consensus):
 - [ ] **Packaging** - cargo-dist, Homebrew formula, AUR package
