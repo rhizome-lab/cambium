@@ -17,7 +17,7 @@ export default withMermaid(
       nav: [
         { text: 'Philosophy', link: '/philosophy' },
         { text: 'Architecture', link: '/architecture-decisions' },
-        { text: 'Rhizome', link: 'https://rhizome-lab.github.io/' },
+        { text: 'Rhizome', link: 'https://docs.rhi.zone/' },
       ],
 
       sidebar: {
