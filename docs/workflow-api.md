@@ -75,9 +75,9 @@ let workflow = Workflow::from_bytes(&yaml, Format::Yaml)?;
 let workflow = Workflow::from_file("workflow.yaml")?;
 ```
 
-Workflow files are just data - cambium eats its own dogfood:
+Workflow files are just data - paraphase eats its own dogfood:
 ```bash
-cambium convert workflow.json workflow.yaml
+paraphase convert workflow.json workflow.yaml
 ```
 
 ## Workflow File Format
@@ -130,25 +130,25 @@ path = "output/sprites.png"
 
 ```bash
 # Plan from CLI args (incomplete - suggests pipeline)
-cambium plan --from sprites/*.png --to spritesheet.png
+paraphase plan --from sprites/*.png --to spritesheet.png
 
 # Plan from workflow file
-cambium plan workflow.yaml
+paraphase plan workflow.yaml
 
 # Plan incomplete workflow file (suggests missing pieces)
-cambium plan partial-workflow.yaml
+paraphase plan partial-workflow.yaml
 
 # Execute workflow
-cambium run workflow.yaml
+paraphase run workflow.yaml
 
 # Execute with overrides
-cambium run workflow.yaml --quality 95 --preset lossless
+paraphase run workflow.yaml --quality 95 --preset lossless
 ```
 
 ## Library API
 
 ```rust
-use cambium::{Workflow, Format, Options};
+use paraphase::{Workflow, Format, Options};
 
 // Build programmatically
 let workflow = Workflow::new()

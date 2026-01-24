@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -e
 
+# Check if we're in a nix environment, if not use nix develop
+if ! command -v cargo &> /dev/null; then
+    echo "Running pre-commit checks in nix develop..."
+    exec nix develop -c "$0" "$@"
+fi
+
 echo "Running cargo fmt check..."
 cargo fmt --all -- --check
 

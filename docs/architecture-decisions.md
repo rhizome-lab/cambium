@@ -1,6 +1,6 @@
 # Architecture Decisions
 
-Record of key technical choices for Cambium.
+Record of key technical choices for Paraphrase.
 
 ## ADR-0001: Plugin Format - C ABI Dynamic Libraries
 
@@ -8,7 +8,7 @@ Record of key technical choices for Cambium.
 
 **Context:**
 
-Cambium needs a plugin system for converters. Options considered:
+Paraphrase needs a plugin system for converters. Options considered:
 
 | Format | Authoring | Performance | Sandboxing | Distribution |
 |--------|-----------|-------------|------------|--------------|
@@ -30,7 +30,7 @@ Cambium needs a plugin system for converters. Options considered:
 **Plugin C API:**
 
 ```c
-// cambium_plugin.h
+// paraphase_plugin.h
 
 #include <stdint.h>
 #include <stddef.h>
@@ -43,7 +43,7 @@ typedef struct {
     const char* from_type;    // e.g. "json"
     const char* to_type;      // e.g. "yaml"
     uint32_t flags;           // CAMBIUM_FLAG_* bitmask
-} CambiumConverter;
+} ParaphraseConverter;
 
 // Flags
 #define CAMBIUM_FLAG_LOSSLESS   (1 << 0)
@@ -52,59 +52,59 @@ typedef struct {
 // Plugin exports these symbols:
 
 // Called once on load, returns API version for compatibility check
-uint32_t cambium_plugin_version(void);
+uint32_t paraphase_plugin_version(void);
 
 // List available converters (caller does NOT free)
-const CambiumConverter* cambium_list_converters(size_t* count);
+const ParaphraseConverter* paraphase_list_converters(size_t* count);
 
 // Perform conversion
 // Returns 0 on success, non-zero error code on failure
-// On success, *output and *output_len are set (caller must free with cambium_free)
+// On success, *output and *output_len are set (caller must free with paraphase_free)
 // options_json may be NULL
-int cambium_convert(
+int paraphase_convert(
     const char* converter_id,
     const uint8_t* input, size_t input_len,
     uint8_t** output, size_t* output_len,
     const char* options_json
 );
 
-// Free memory allocated by cambium_convert
-void cambium_free(void* ptr);
+// Free memory allocated by paraphase_convert
+void paraphase_free(void* ptr);
 
 // Optional: get error message for last failure (may return NULL)
-const char* cambium_last_error(void);
+const char* paraphase_last_error(void);
 ```
 
 **Rust Plugin Authoring:**
 
-`cambium-plugin` crate provides ergonomic wrapper:
+`paraphase-plugin` crate provides ergonomic wrapper:
 
 ```rust
-use cambium_plugin::prelude::*;
+use paraphase_plugin::prelude::*;
 
-#[cambium_converter(from = "json", to = "yaml", lossless)]
+#[paraphase_converter(from = "json", to = "yaml", lossless)]
 fn json_to_yaml(input: &[u8], _opts: &Options) -> Result<Vec<u8>> {
     let value: serde_json::Value = serde_json::from_slice(input)?;
     Ok(serde_yaml::to_vec(&value)?)
 }
 
 // Macro generates:
-// - #[no_mangle] extern "C" fn cambium_plugin_version() -> u32
-// - #[no_mangle] extern "C" fn cambium_list_converters(*mut usize) -> *const CambiumConverter
-// - #[no_mangle] extern "C" fn cambium_convert(...) -> i32
-// - #[no_mangle] extern "C" fn cambium_free(*mut c_void)
-// - #[no_mangle] extern "C" fn cambium_last_error() -> *const c_char
+// - #[no_mangle] extern "C" fn paraphase_plugin_version() -> u32
+// - #[no_mangle] extern "C" fn paraphase_list_converters(*mut usize) -> *const ParaphraseConverter
+// - #[no_mangle] extern "C" fn paraphase_convert(...) -> i32
+// - #[no_mangle] extern "C" fn paraphase_free(*mut c_void)
+// - #[no_mangle] extern "C" fn paraphase_last_error() -> *const c_char
 
-cambium_plugin::export![json_to_yaml];
+paraphase_plugin::export![json_to_yaml];
 ```
 
 **Plugin Discovery:**
 
 Plugins are discovered from (in order):
-1. Built-in converters (compiled into cambium binary)
+1. Built-in converters (compiled into paraphase binary)
 2. `$CAMBIUM_PLUGIN_PATH` (colon-separated)
-3. `~/.cambium/plugins/*.{so,dylib,dll}`
-4. Project-local `./cambium-plugins/*.{so,dylib,dll}`
+3. `~/.paraphase/plugins/*.{so,dylib,dll}`
+4. Project-local `./paraphase-plugins/*.{so,dylib,dll}`
 
 Later sources can override earlier ones (project-local wins).
 
@@ -115,13 +115,13 @@ Later sources can override earlier ones (project-local wins).
 fn load_plugin(path: &Path) -> Result<Plugin> {
     let lib = libloading::Library::new(path)?;
 
-    let version: Symbol<fn() -> u32> = lib.get(b"cambium_plugin_version")?;
+    let version: Symbol<fn() -> u32> = lib.get(b"paraphase_plugin_version")?;
     if version() != CAMBIUM_PLUGIN_API_VERSION {
         return Err(IncompatibleVersion);
     }
 
-    let list: Symbol<fn(*mut usize) -> *const CambiumConverter> =
-        lib.get(b"cambium_list_converters")?;
+    let list: Symbol<fn(*mut usize) -> *const ParaphraseConverter> =
+        lib.get(b"paraphase_list_converters")?;
     // ... register converters
 }
 ```
@@ -148,7 +148,7 @@ fn load_plugin(path: &Path) -> Result<Plugin> {
 
 **Context:**
 
-Cambium can be designed as either:
+Paraphrase can be designed as either:
 1. **Library-first** - Rust crate with CLI as thin wrapper
 2. **CLI-first** - Command-line tool that can also be used as library
 
@@ -165,7 +165,7 @@ Cambium can be designed as either:
 **Library API sketch:**
 
 ```rust
-// cambium/src/lib.rs
+// paraphase/src/lib.rs
 
 /// Registry of available converters
 pub struct Registry { /* ... */ }
@@ -233,7 +233,7 @@ pub trait Converter: Send + Sync {
 Instead of hardcoded defaults, presets are declarative option bundles:
 
 ```toml
-# presets.toml (shipped with cambium or user-defined)
+# presets.toml (shipped with paraphase or user-defined)
 
 [presets.lossless]
 description = "Preserve quality, larger files"
@@ -254,11 +254,11 @@ strip_metadata = true
 
 Usage:
 ```bash
-cambium convert image.png image.webp --preset crush
-cambium convert video.mp4 video.webp --preset lossless
+paraphase convert image.png image.webp --preset crush
+paraphase convert video.mp4 video.webp --preset lossless
 
 # Preset + overrides
-cambium convert image.png image.webp --preset balanced --quality 90
+paraphase convert image.png image.webp --preset balanced --quality 90
 ```
 
 Presets map normalized options to converter-specific flags:
@@ -269,9 +269,9 @@ Converters declare how they interpret normalized options; presets just set those
 **CLI as wrapper:**
 
 ```rust
-// cambium-cli/src/main.rs
+// paraphase-cli/src/main.rs
 
-use cambium::{Registry, Options};
+use paraphase::{Registry, Options};
 use clap::Parser;
 
 fn main() -> anyhow::Result<()> {
@@ -320,7 +320,7 @@ fn main() -> anyhow::Result<()> {
 
 **Consequences:**
 
-- (+) Resin can use cambium with zero overhead
+- (+) Resin can use paraphase with zero overhead
 - (+) In-memory conversions without temp files
 - (+) Testable without spawning processes
 - (+) Can introspect and optimize conversion paths
@@ -331,9 +331,9 @@ fn main() -> anyhow::Result<()> {
 
 ```
 crates/
-  cambium/           # library (pub API)
-  cambium-cli/       # binary (thin wrapper)
-  cambium-plugin/    # plugin authoring helpers
+  paraphase/           # library (pub API)
+  paraphase-cli/       # binary (thin wrapper)
+  paraphase-plugin/    # plugin authoring helpers
 ```
 
 ---
@@ -344,7 +344,7 @@ crates/
 
 **Context:**
 
-Cambium needs a way to represent "what kind of data is this" for routing conversions. Options considered:
+Paraphrase needs a way to represent "what kind of data is this" for routing conversions. Options considered:
 
 | Model | Example | Expressiveness |
 |-------|---------|----------------|
@@ -442,7 +442,7 @@ Or flat: format, width, height, ... (simpler, but collision risk)
 **Schemas as plugin:**
 
 ```rust
-// Optional: cambium-schemas plugin
+// Optional: paraphase-schemas plugin
 pub struct Schema {
     pub domain: String,
     pub properties: Vec<PropertyDef>,
@@ -501,7 +501,7 @@ removes: [pages, ...]  // PDF-specific props don't apply to image
 
 **Context:**
 
-Cambium needs to handle N→M conversions (1→1, 1→N, N→1, N→M). Early designs tried to encode cardinality in PropertyPattern itself (via `$each` syntax or separate Cardinality enum), which felt awkward and coupled concerns.
+Paraphrase needs to handle N→M conversions (1→1, 1→N, N→1, N→M). Early designs tried to encode cardinality in PropertyPattern itself (via `$each` syntax or separate Cardinality enum), which felt awkward and coupled concerns.
 
 Prior art: [ComfyUI](https://github.com/comfyanonymous/ComfyUI) uses named input/output ports with explicit types, handling multiple outputs and list/batch processing cleanly.
 
@@ -607,15 +607,15 @@ steps:
 
 **Context:**
 
-As Cambium adds more transformations (resize, crop, watermark), the question arises: when does a "conversion tool" become an "asset editor"? Without a clear boundary, scope creep leads to reimplementing Photoshop.
+As Paraphrase adds more transformations (resize, crop, watermark), the question arises: when does a "conversion tool" become an "asset editor"? Without a clear boundary, scope creep leads to reimplementing Photoshop.
 
-**Decision:** Cambium handles transformations expressible as **normalized options or property constraints**. Operations requiring **pixel-level precision or creative judgment** are out of scope.
+**Decision:** Paraphrase handles transformations expressible as **normalized options or property constraints**. Operations requiring **pixel-level precision or creative judgment** are out of scope.
 
 **The test:** Can an agent express the operation without looking at the specific content?
 
 **Rationale:**
 
-From the philosophy doc: "Agent says 'I have X, I need Y' - cambium finds the path." The agent shouldn't need to make creative decisions or specify exact coordinates.
+From the philosophy doc: "Agent says 'I have X, I need Y' - paraphase finds the path." The agent shouldn't need to make creative decisions or specify exact coordinates.
 
 | Operation | Agent expression | In scope? |
 |-----------|------------------|-----------|
@@ -632,15 +632,15 @@ From the philosophy doc: "Agent says 'I have X, I need Y' - cambium finds the pa
 
 **Normalized options:**
 
-Cambium's philosophy is one vocabulary, many backends:
+Paraphrase's philosophy is one vocabulary, many backends:
 
 ```bash
 # Same --max-width everywhere
-cambium convert image.png image.webp --max-width 1024
-cambium convert video.mp4 video.webp --max-width 1024
+paraphase convert image.png image.webp --max-width 1024
+paraphase convert video.mp4 video.webp --max-width 1024
 ```
 
-Options that can be normalized across domains belong in Cambium. Options that are tool-specific creative controls don't.
+Options that can be normalized across domains belong in Paraphrase. Options that are tool-specific creative controls don't.
 
 **Multi-input operations:**
 
@@ -667,7 +667,7 @@ options:
 
 **Position presets:**
 
-For operations requiring placement, Cambium provides semantic presets:
+For operations requiring placement, Paraphrase provides semantic presets:
 
 | Preset | Meaning |
 |--------|---------|
@@ -683,10 +683,10 @@ Aspect-ratio cropping uses gravity to determine what to keep:
 
 ```bash
 # Crop to 16:9, keeping center
-cambium convert photo.jpg photo.jpg --aspect 16:9 --gravity center
+paraphase convert photo.jpg photo.jpg --aspect 16:9 --gravity center
 
 # Crop to 1:1, keeping top (for portraits/headshots)
-cambium convert photo.jpg photo.jpg --aspect 1:1 --gravity top
+paraphase convert photo.jpg photo.jpg --aspect 1:1 --gravity top
 ```
 
 **What's explicitly out:**
@@ -725,7 +725,7 @@ If a transformation becomes common enough that agents frequently need it AND it 
 
 **Context:**
 
-Cambium's current architecture has three layers:
+Paraphrase's current architecture has three layers:
 1. **Converters** - individual transformations (bytes → bytes)
 2. **Planner** - finds conversion paths
 3. **CLI** - orchestrates execution

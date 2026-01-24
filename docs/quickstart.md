@@ -1,57 +1,57 @@
 # Quickstart
 
-Get up and running with Cambium in minutes.
+Get up and running with Paraphrase in minutes.
 
 ## Installation
 
 ```bash
-cargo install cambium-cli
+cargo install paraphase-cli
 ```
 
-This installs Cambium with default converters (common serde and image formats).
+This installs Paraphrase with default converters (common serde and image formats).
 
 ### Minimal or Custom Builds
 
 ```bash
 # Only JSON and PNG
-cargo install cambium-cli --no-default-features \
-  --features cambium-serde/json,cambium-image/png
+cargo install paraphase-cli --no-default-features \
+  --features paraphase-serde/json,paraphase-image/png
 
 # All serde formats, no image support
-cargo install cambium-cli --no-default-features --features serde-all
+cargo install paraphase-cli --no-default-features --features serde-all
 
 # Everything
-cargo install cambium-cli --features all
+cargo install paraphase-cli --features all
 ```
 
 ## Basic Usage
 
 ### Convert Files
 
-Cambium auto-detects formats from file extensions:
+Paraphrase auto-detects formats from file extensions:
 
 ```bash
 # Config formats
-cambium convert config.json config.yaml
-cambium convert settings.yaml settings.toml
+paraphase convert config.json config.yaml
+paraphase convert settings.yaml settings.toml
 
 # Image formats
-cambium convert photo.png photo.webp
-cambium convert image.jpg image.gif
+paraphase convert photo.png photo.webp
+paraphase convert image.jpg image.gif
 ```
 
 Override detection with explicit formats:
 
 ```bash
-cambium convert data.bin output.json --from msgpack --to json
+paraphase convert data.bin output.json --from msgpack --to json
 ```
 
 ### Plan Conversions
 
-See what Cambium will do without executing:
+See what Paraphrase will do without executing:
 
 ```bash
-cambium plan input.json output.toml
+paraphase plan input.json output.toml
 ```
 
 Output:
@@ -67,7 +67,7 @@ Total cost: 1
 ### List Available Converters
 
 ```bash
-cambium list
+paraphase list
 ```
 
 Shows all registered converters with their input/output properties.
@@ -89,10 +89,10 @@ sink:
 Run with auto-planning:
 
 ```bash
-cambium run workflow.yaml
+paraphase run workflow.yaml
 ```
 
-Cambium finds the conversion path automatically.
+Paraphrase finds the conversion path automatically.
 
 ### Explicit Steps
 
@@ -110,13 +110,13 @@ sink:
 ## Library Usage
 
 ```rust
-use cambium::{Registry, Planner, Properties, PropertyPattern, Cardinality, PropertiesExt};
+use paraphase::{Registry, Planner, Properties, PropertyPattern, Cardinality, PropertiesExt};
 
 fn main() -> anyhow::Result<()> {
     // Create registry and register converters
     let mut registry = Registry::new();
-    cambium_serde::register_all(&mut registry);
-    cambium_image::register_all(&mut registry);
+    paraphase_serde::register_all(&mut registry);
+    paraphase_image::register_all(&mut registry);
 
     // Plan a conversion
     let planner = Planner::new(&registry);

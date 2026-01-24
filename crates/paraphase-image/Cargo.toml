@@ -1,0 +1,44 @@
+[package]
+name = "rhi-paraphase-image"
+description = "Image format converters for Paraphase"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["png", "jpeg", "webp", "gif"]
+
+# Lossless formats
+png = []
+gif = []
+bmp = []
+ico = []
+tiff = []
+tga = []
+pnm = []
+farbfeld = []
+qoi = []
+
+# Lossy formats
+jpeg = []
+webp = []
+avif = ["image/avif"]
+
+# HDR formats
+openexr = ["image/exr"]
+hdr = []
+
+# All image formats
+all = [
+    "png", "jpeg", "webp", "gif", "bmp", "ico", "tiff", "tga",
+    "pnm", "farbfeld", "qoi", "avif", "openexr", "hdr",
+]
+
+[dependencies]
+rhi-paraphase-core.workspace = true
+indexmap = "2"
+image = { version = "0.25", default-features = false, features = [
+    "png", "jpeg", "gif", "webp", "bmp", "ico", "tiff", "tga",
+    "pnm", "ff", "qoi", "hdr",
+] }

@@ -1,8 +1,8 @@
 # Philosophy
 
-Core design principles for Cambium.
+Core design principles for Paraphrase.
 
-## Cambium is a Pipeline Orchestrator
+## Paraphrase is a Pipeline Orchestrator
 
 **Founding use case:** Game asset conversion - textures, meshes, audio, configs all need processing through diverse tools with inconsistent interfaces.
 
@@ -17,18 +17,18 @@ When an AI agent (like moss) needs to convert data, it faces:
 - "What flags? Is it installed? Which version?"
 - Hallucinated flags, wrong CLI versions, failed optimizations
 
-**Cambium solves this by being a route planner, not a task runner.**
+**Paraphrase solves this by being a route planner, not a task runner.**
 
 ```bash
 # Task runner (make/just): agent must know the recipe
 blender --background --python export.py -- input.blend output.glb
 gltf-pipeline -i output.glb -o optimized.glb --draco.compressionLevel 7
 
-# Cambium: agent only knows source and destination
-cambium convert model.blend optimized.glb --optimize
+# Paraphrase: agent only knows source and destination
+paraphase convert model.blend optimized.glb --optimize
 ```
 
-The agent says "I have X, I need Y" - cambium finds the path through the graph.
+The agent says "I have X, I need Y" - paraphase finds the path through the graph.
 
 **Why not existing tools?**
 
@@ -37,7 +37,7 @@ The agent says "I have X, I need Y" - cambium finds the path through the graph.
 | Make | File-based, mtime-driven | You write the recipes |
 | Just | Task runner | You write the recipes manually |
 | Nix | Content-addressed, reproducible | Heavyweight, config-heavy |
-| Cambium | Type-driven route planning | Agent just declares intent |
+| Paraphrase | Type-driven route planning | Agent just declares intent |
 
 **Scope test:** If the transformation is "agent shouldn't need to know the toolchain," it's in scope. If it requires business logic or architectural decisions, it's out.
 
@@ -48,7 +48,7 @@ Conversions are two-phase:
 **Phase 1: Plan** - Find path, surface required decisions.
 
 ```bash
-cambium plan --from sprites/*.png --to spritesheet.png
+paraphase plan --from sprites/*.png --to spritesheet.png
 
 # Output:
 # Suggested path: glob → regex-extract → spritesheet-pack
@@ -64,7 +64,7 @@ cambium plan --from sprites/*.png --to spritesheet.png
 **Phase 2: Execute** - Provide options, run the path.
 
 ```bash
-cambium convert sprites/*.png spritesheet.png \
+paraphase convert sprites/*.png spritesheet.png \
     --pattern "sprite_(?<id>\d+)_(?<frame>\d+)" \
     --preset balanced
 ```
@@ -73,22 +73,22 @@ Incomplete plans = suggestions. No separate `suggest` command.
 
 ```bash
 # Incomplete: only source and sink
-cambium plan --from input.png --to output.webp
-# Cambium suggests pipeline + shows what options are available
+paraphase plan --from input.png --to output.webp
+# Paraphrase suggests pipeline + shows what options are available
 
 # Complete: shows exact execution plan
-cambium plan workflow.yaml
+paraphase plan workflow.yaml
 ```
 
 ## Normalized Options
 
-Users learn ONE vocabulary. Cambium maps to tool-specific flags:
+Users learn ONE vocabulary. Paraphrase maps to tool-specific flags:
 
 ```bash
 # Same --quality flag everywhere
-cambium convert image.png image.webp --quality 80   # → cwebp -q 80
-cambium convert video.mp4 video.webm --quality 80   # → ffmpeg -crf 23
-cambium convert model.glb model.glb --quality 80    # → draco level 7
+paraphase convert image.png image.webp --quality 80   # → cwebp -q 80
+paraphase convert video.mp4 video.webm --quality 80   # → ffmpeg -crf 23
+paraphase convert model.glb model.glb --quality 80    # → draco level 7
 ```
 
 Agent doesn't need to know that quality=80 means different flags for different tools.
@@ -113,8 +113,8 @@ strip_metadata = true
 ```
 
 ```bash
-cambium convert image.png image.webp --preset crush
-cambium convert image.png image.webp --preset balanced --quality 90  # override
+paraphase convert image.png image.webp --preset crush
+paraphase convert image.png image.webp --preset balanced --quality 90  # override
 ```
 
 ## Property Bags, Not Types
@@ -159,10 +159,10 @@ sink:
   path: "output/sprites.png"
 ```
 
-Format-agnostic: YAML, TOML, JSON - cambium eats its own dogfood.
+Format-agnostic: YAML, TOML, JSON - paraphase eats its own dogfood.
 
 ```bash
-cambium convert workflow.json workflow.yaml  # convert workflow files too
+paraphase convert workflow.json workflow.yaml  # convert workflow files too
 ```
 
 Agents can build workflows programmatically:
@@ -197,7 +197,7 @@ No special cases: sidecars, manifests, spritesheets are all just N→M conversio
 Structured filename parsing is a plugin, not core. Uses regex:
 
 ```bash
-cambium convert "sprites/*.png" spritesheet.png \
+paraphase convert "sprites/*.png" spritesheet.png \
     --pattern "sprite_(?<id>\d+)_(?<frame>\d+)"
 ```
 
@@ -209,24 +209,24 @@ Why regex: agents know regex (even if imperfectly), no new DSL to learn.
 
 ## Plugins, Not Monolith
 
-Unlike pandoc/ffmpeg (which bundle everything), Cambium is:
+Unlike pandoc/ffmpeg (which bundle everything), Paraphrase is:
 - **Core**: property bags, graph traversal, workflow orchestration, CLI
 - **Plugins**: converters, inspectors, pattern extractors
 
 ```bash
-cambium plugin add cambium-images   # png, jpg, webp, etc.
-cambium plugin add cambium-ffmpeg   # video/audio via ffmpeg
-cambium plugin add cambium-regex    # pattern extraction
+paraphase plugin add paraphase-images   # png, jpg, webp, etc.
+paraphase plugin add paraphase-ffmpeg   # video/audio via ffmpeg
+paraphase plugin add paraphase-regex    # pattern extraction
 ```
 
 Plugins are C ABI dynamic libraries. See [ADR-0001](./architecture-decisions.md#adr-0001-plugin-format---c-abi-dynamic-libraries).
 
 ## Library-First
 
-Cambium is a library with a CLI wrapper, not vice versa.
+Paraphrase is a library with a CLI wrapper, not vice versa.
 
 ```rust
-use cambium::{Registry, Workflow};
+use paraphase::{Registry, Workflow};
 
 let registry = Registry::with_default_plugins()?;
 let plan = registry.plan(&from_props, &to_props)?;
@@ -249,7 +249,7 @@ One model, many uses.
 
 ## Prior Art & Inspiration
 
-Tools that informed Cambium's design:
+Tools that informed Paraphrase's design:
 
 | Tool | What It Does | What We Take |
 |------|--------------|--------------|
@@ -259,4 +259,4 @@ Tools that informed Cambium's design:
 | **[ImageMagick](https://imagemagick.org)** | Image manipulation | Batch processing, format detection |
 | **[jq](https://jqlang.github.io/jq/)** | JSON processor | Streaming, composable transformations |
 
-**Key difference:** These tools are format-specific or monolithic. Cambium is a **unified orchestrator** - one interface that routes to the right tool for each conversion.
+**Key difference:** These tools are format-specific or monolithic. Paraphrase is a **unified orchestrator** - one interface that routes to the right tool for each conversion.

@@ -1,17 +1,17 @@
-# Cambium
+# Paraphrase
 
 Type-driven data transformation pipeline.
 
-Part of the [Rhizome](https://rhizome-lab.github.io) ecosystem.
+Part of the [rhi](https://rhi.zone) ecosystem.
 
 ## Overview
 
-Cambium is a route planner for data conversion. Given source and target properties, it finds a path through available converters automatically.
+Paraphrase is a route planner for data conversion. Given source and target properties, it finds a path through available converters automatically.
 
 ## Installation
 
 ```bash
-cargo install cambium-cli
+cargo install rhi-paraphase-cli
 ```
 
 ### Feature Flags
@@ -36,14 +36,14 @@ For minimal builds or specific formats:
 
 ```bash
 # Only JSON and PNG
-cargo install cambium-cli --no-default-features \
-  --features cambium-serde/json,cambium-image/png
+cargo install rhi-paraphase-cli --no-default-features \
+  --features rhi-paraphase-serde/json,rhi-paraphase-image/png
 
 # Serde formats only (no image support)
-cargo install cambium-cli --no-default-features --features serde-all
+cargo install rhi-paraphase-cli --no-default-features --features serde-all
 
 # Everything
-cargo install cambium-cli --features all
+cargo install rhi-paraphase-cli --features all
 ```
 
 ## Usage
@@ -52,36 +52,36 @@ cargo install cambium-cli --features all
 
 ```bash
 # Auto-detect formats from extensions
-cambium convert input.json output.yaml
-cambium convert photo.png photo.webp
+paraphase convert input.json output.yaml
+paraphase convert photo.png photo.webp
 
 # Explicit formats
-cambium convert data.bin output.json --from msgpack --to json
+paraphase convert data.bin output.json --from msgpack --to json
 ```
 
 ### Image transforms
 
 ```bash
 # Resize to fit within max width (preserves aspect ratio)
-cambium convert photo.png thumb.png --max-width 200
+paraphase convert photo.png thumb.png --max-width 200
 
 # Scale by factor
-cambium convert photo.png half.png --scale 0.5
+paraphase convert photo.png half.png --scale 0.5
 
 # Crop to aspect ratio
-cambium convert photo.png banner.png --aspect 16:9
+paraphase convert photo.png banner.png --aspect 16:9
 
 # Crop with gravity (anchor point)
-cambium convert photo.png portrait.png --aspect 3:4 --gravity top
+paraphase convert photo.png portrait.png --aspect 3:4 --gravity top
 
 # Combine transforms with format conversion
-cambium convert photo.png avatar.webp --aspect 1:1 --max-width 150
+paraphase convert photo.png avatar.webp --aspect 1:1 --max-width 150
 
 # Add watermark
-cambium convert photo.png branded.png --watermark logo.png --watermark-position bottom-right
+paraphase convert photo.png branded.png --watermark logo.png --watermark-position bottom-right
 
 # Watermark with opacity and margin
-cambium convert photo.png branded.png --watermark logo.png \
+paraphase convert photo.png branded.png --watermark logo.png \
   --watermark-position bottom-right --watermark-opacity 0.5 --watermark-margin 20
 ```
 
@@ -89,37 +89,37 @@ cambium convert photo.png branded.png --watermark logo.png \
 
 ```bash
 # Convert between video formats
-cambium convert video.mp4 video.webm
+paraphase convert video.mp4 video.webm
 
 # Resize video
-cambium convert video.mp4 small.mp4 --max-width 720
+paraphase convert video.mp4 small.mp4 --max-width 720
 
 # GIF to video
-cambium convert animation.gif video.mp4
+paraphase convert animation.gif video.mp4
 ```
 
 ### Audio conversion (pure Rust)
 
 ```bash
 # Convert MP3 to WAV
-cambium convert song.mp3 song.wav
+paraphase convert song.mp3 song.wav
 
 # Convert FLAC to WAV
-cambium convert album.flac album.wav
+paraphase convert album.flac album.wav
 ```
 
 ### Plan conversions
 
 ```bash
 # Show conversion steps without executing
-cambium plan input.json output.toml
-cambium plan photo.png photo.avif
+paraphase plan input.json output.toml
+paraphase plan photo.png photo.avif
 ```
 
 ### List converters
 
 ```bash
-cambium list
+paraphase list
 ```
 
 ### Workflows
@@ -136,7 +136,7 @@ sink:
 
 Run with auto-planning:
 ```bash
-cambium run workflow.yaml
+paraphase run workflow.yaml
 ```
 
 Or with explicit steps:
@@ -151,7 +151,7 @@ sink:
 
 ## Supported Formats
 
-### Serde Formats (cambium-serde)
+### Serde Formats (rhi-paraphase-serde)
 
 | Format | Feature | Extensions |
 |--------|---------|------------|
@@ -174,7 +174,7 @@ sink:
 | Pickle | `pickle` | .pickle, .pkl |
 | Property List | `plist` | .plist |
 
-### Image Formats (cambium-image)
+### Image Formats (rhi-paraphase-image)
 
 | Format | Feature | Extensions |
 |--------|---------|------------|
@@ -193,7 +193,7 @@ sink:
 | OpenEXR | `openexr` | .exr |
 | Radiance HDR | `hdr` | .hdr |
 
-### Video Formats (cambium-video)
+### Video Formats (rhi-paraphase-video)
 
 | Format | Feature | Extensions |
 |--------|---------|------------|
@@ -204,7 +204,7 @@ sink:
 | MOV | `mov` | .mov, .qt |
 | GIF | `gif` | .gif |
 
-### Audio Formats (cambium-audio)
+### Audio Formats (rhi-paraphase-audio)
 
 | Format | Feature | Decode | Encode |
 |--------|---------|--------|--------|
@@ -217,12 +217,12 @@ sink:
 ## Library Usage
 
 ```rust
-use cambium::{Registry, Planner, Properties, PropertyPattern, Cardinality};
+use rhi_paraphase_core::{Registry, Planner, Properties, PropertyPattern, Cardinality};
 
 // Create registry and register converters
 let mut registry = Registry::new();
-cambium_serde::register_all(&mut registry);
-cambium_image::register_all(&mut registry);
+rhi_paraphase_serde::register_all(&mut registry);
+rhi_paraphase_image::register_all(&mut registry);
 
 // Plan a conversion
 let planner = Planner::new(&registry);

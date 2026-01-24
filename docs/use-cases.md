@@ -9,8 +9,8 @@ Concrete scenarios to drive type system design. Grouped by domain and complexity
 **Scenario:** Convert between config formats losslessly.
 
 ```bash
-cambium convert config.json config.yaml
-cambium convert config.yaml config.toml
+paraphase convert config.json config.yaml
+paraphase convert config.yaml config.toml
 ```
 
 **Type complexity:** Trivial - flat types, no parameters.
@@ -23,7 +23,7 @@ cambium convert config.yaml config.toml
 **Scenario:** Convert JSON, but only if it matches a schema.
 
 ```bash
-cambium convert --validate schema.json input.json output.yaml
+paraphase convert --validate schema.json input.json output.yaml
 ```
 
 **Type complexity:** Type + constraint?
@@ -35,8 +35,8 @@ cambium convert --validate schema.json input.json output.yaml
 **Scenario:** Same format in, same format out, different representation.
 
 ```bash
-cambium convert input.json --to json --minify
-cambium convert input.json --to json --pretty
+paraphase convert input.json --to json --minify
+paraphase convert input.json --to json --pretty
 ```
 
 **Type complexity:** Same type, different output options.
@@ -52,7 +52,7 @@ cambium convert input.json --to json --pretty
 **Scenario:** Simple format conversion.
 
 ```bash
-cambium convert photo.png photo.webp
+paraphase convert photo.png photo.webp
 ```
 
 **Type complexity:** Trivial - flat types.
@@ -62,7 +62,7 @@ cambium convert photo.png photo.webp
 **Scenario:** Convert all PNGs to WebP at max 1024px width.
 
 ```bash
-cambium convert "*.png" --to webp --max-width 1024
+paraphase convert "*.png" --to webp --max-width 1024
 ```
 
 **Type complexity:** Parameters on output.
@@ -74,7 +74,7 @@ cambium convert "*.png" --to webp --max-width 1024
 **Scenario:** Convert images, but only if they exceed a size threshold.
 
 ```bash
-cambium convert "*.png" --to webp --if "width > 2048"
+paraphase convert "*.png" --to webp --if "width > 2048"
 ```
 
 **Type complexity:** Predicate on input.
@@ -86,8 +86,8 @@ cambium convert "*.png" --to webp --if "width > 2048"
 **Scenario:** Explicitly choose lossy or lossless encoding.
 
 ```bash
-cambium convert photo.png photo.webp --lossy --quality 80
-cambium convert diagram.png diagram.webp --lossless
+paraphase convert photo.png photo.webp --lossy --quality 80
+paraphase convert diagram.png diagram.webp --lossless
 ```
 
 **Type complexity:** Same output format, different encoding.
@@ -103,7 +103,7 @@ cambium convert diagram.png diagram.webp --lossless
 **Scenario:** Change container without re-encoding.
 
 ```bash
-cambium convert video.mkv video.mp4 --copy-streams
+paraphase convert video.mkv video.mp4 --copy-streams
 ```
 
 **Type complexity:** Container vs codec distinction.
@@ -115,9 +115,9 @@ cambium convert video.mkv video.mp4 --copy-streams
 **Scenario:** Convert YUV411 to YUV420p for compatibility.
 
 ```bash
-cambium convert input.mp4 output.mp4 --pixfmt yuv420p
+paraphase convert input.mp4 output.mp4 --pixfmt yuv420p
 # or: only convert if source is yuv411
-cambium convert input.mp4 output.mp4 --from-pixfmt yuv411 --to-pixfmt yuv420p
+paraphase convert input.mp4 output.mp4 --from-pixfmt yuv411 --to-pixfmt yuv420p
 ```
 
 **Type complexity:** This is the motivating example.
@@ -130,7 +130,7 @@ cambium convert input.mp4 output.mp4 --from-pixfmt yuv411 --to-pixfmt yuv420p
 **Scenario:** Downscale 4K to 1080p, leave 1080p alone.
 
 ```bash
-cambium convert "*.mp4" --to mp4 --max-height 1080
+paraphase convert "*.mp4" --to mp4 --max-height 1080
 ```
 
 **Type complexity:** Conditional transformation.
@@ -142,7 +142,7 @@ cambium convert "*.mp4" --to mp4 --max-height 1080
 **Scenario:** Re-encode H.264 to H.265/HEVC.
 
 ```bash
-cambium convert input.mp4 output.mp4 --codec hevc
+paraphase convert input.mp4 output.mp4 --codec hevc
 ```
 
 **Type complexity:** Codec as type or parameter?
@@ -158,7 +158,7 @@ cambium convert input.mp4 output.mp4 --codec hevc
 **Scenario:** Lossy compression.
 
 ```bash
-cambium convert audio.wav audio.mp3 --bitrate 320k
+paraphase convert audio.wav audio.mp3 --bitrate 320k
 ```
 
 **Type complexity:** Trivial + quality parameter.
@@ -168,7 +168,7 @@ cambium convert audio.wav audio.mp3 --bitrate 320k
 **Scenario:** Resample 48kHz to 44.1kHz for CD.
 
 ```bash
-cambium convert audio.wav output.wav --samplerate 44100
+paraphase convert audio.wav output.wav --samplerate 44100
 ```
 
 **Type complexity:** Same format, different sample rate.
@@ -179,7 +179,7 @@ cambium convert audio.wav output.wav --samplerate 44100
 **Scenario:** 5.1 surround to stereo.
 
 ```bash
-cambium convert surround.wav stereo.wav --channels 2
+paraphase convert surround.wav stereo.wav --channels 2
 ```
 
 **Type complexity:** Channel layout as type parameter?
@@ -193,7 +193,7 @@ cambium convert surround.wav stereo.wav --channels 2
 **Scenario:** Basic document conversion.
 
 ```bash
-cambium convert readme.md readme.html
+paraphase convert readme.md readme.html
 ```
 
 **Type complexity:** Trivial.
@@ -203,7 +203,7 @@ cambium convert readme.md readme.html
 **Scenario:** No direct converter, needs intermediate.
 
 ```bash
-cambium convert readme.md readme.pdf
+paraphase convert readme.md readme.pdf
 # Internally: md → html → pdf, or md → latex → pdf
 ```
 
@@ -215,8 +215,8 @@ cambium convert readme.md readme.pdf
 **Scenario:** YAML frontmatter should be preserved/extracted.
 
 ```bash
-cambium convert post.md post.html --preserve-frontmatter
-cambium convert post.md --extract-frontmatter > metadata.yaml
+paraphase convert post.md post.html --preserve-frontmatter
+paraphase convert post.md --extract-frontmatter > metadata.yaml
 ```
 
 **Type complexity:** Substructure within format.
@@ -227,8 +227,8 @@ cambium convert post.md --extract-frontmatter > metadata.yaml
 **Scenario:** GitHub-flavored markdown vs CommonMark vs MultiMarkdown.
 
 ```bash
-cambium convert --from gfm input.md output.html
-cambium convert --from commonmark input.md output.html
+paraphase convert --from gfm input.md output.html
+paraphase convert --from commonmark input.md output.html
 ```
 
 **Type complexity:** Variants of same base format.
@@ -244,7 +244,7 @@ cambium convert --from commonmark input.md output.html
 **Scenario:** Convert mesh formats.
 
 ```bash
-cambium convert model.obj model.gltf
+paraphase convert model.obj model.gltf
 ```
 
 **Type complexity:** Trivial if just format.
@@ -254,7 +254,7 @@ cambium convert model.obj model.gltf
 **Scenario:** Decimate mesh, merge vertices.
 
 ```bash
-cambium convert model.obj model.gltf --decimate 0.5 --merge-threshold 0.001
+paraphase convert model.obj model.gltf --decimate 0.5 --merge-threshold 0.001
 ```
 
 **Type complexity:** Transformation during conversion.
@@ -265,7 +265,7 @@ cambium convert model.obj model.gltf --decimate 0.5 --merge-threshold 0.001
 **Scenario:** glTF with embedded textures → glTF with external textures.
 
 ```bash
-cambium convert model.glb model.gltf --extract-textures ./textures/
+paraphase convert model.glb model.gltf --extract-textures ./textures/
 ```
 
 **Type complexity:** Same format, different embedding mode.
@@ -280,8 +280,8 @@ cambium convert model.glb model.gltf --extract-textures ./textures/
 **Scenario:** Convert between archive formats.
 
 ```bash
-cambium convert archive.zip archive.tar.gz
-cambium convert archive.rar archive.7z
+paraphase convert archive.zip archive.tar.gz
+paraphase convert archive.rar archive.7z
 ```
 
 **Type complexity:** Straightforward format conversion.
@@ -291,8 +291,8 @@ cambium convert archive.rar archive.7z
 **Scenario:** `.tar.gz` is gzip(tar), not a single format.
 
 ```bash
-cambium convert archive.tar.gz archive.tar.xz  # recompress only
-cambium convert archive.tar.gz archive.zip     # unpack tar, repack as zip
+paraphase convert archive.tar.gz archive.tar.xz  # recompress only
+paraphase convert archive.tar.gz archive.zip     # unpack tar, repack as zip
 ```
 
 **Type complexity:** Layered types.
@@ -305,24 +305,24 @@ cambium convert archive.tar.gz archive.zip     # unpack tar, repack as zip
 **Scenario:** JAR, DOCX, APK, Unity packages, Godot PCK, some EXEs are actually ZIPs.
 
 ```bash
-cambium convert app.jar contents/         # extract
-cambium convert contents/ app.jar         # repack
-cambium convert game.pck assets/          # godot package
-cambium convert document.docx document/   # office xml
+paraphase convert app.jar contents/         # extract
+paraphase convert contents/ app.jar         # repack
+paraphase convert game.pck assets/          # godot package
+paraphase convert document.docx document/   # office xml
 ```
 
 **Type complexity:** Same underlying format, different semantics.
 - `jar` ≈ `zip[convention=java]`
 - `docx` ≈ `zip[convention=ooxml]`
 - `apk` ≈ `zip[convention=android]`
-- Should cambium know these equivalences?
+- Should paraphase know these equivalences?
 
 ### UC-58: Extract + convert contents
 
 **Scenario:** Extract archive, convert contents, repack.
 
 ```bash
-cambium convert textures.zip textures-optimized.zip \
+paraphase convert textures.zip textures-optimized.zip \
   --convert-contents "*.png -> webp" --quality 80
 ```
 
@@ -335,8 +335,8 @@ cambium convert textures.zip textures-optimized.zip \
 **Scenario:** EXE that's secretly a ZIP with a stub.
 
 ```bash
-cambium convert installer.exe contents/    # extract
-cambium convert contents/ installer.exe    # create sfx
+paraphase convert installer.exe contents/    # extract
+paraphase convert contents/ installer.exe    # create sfx
 ```
 
 **Type complexity:** Format detection vs extension.
@@ -352,7 +352,7 @@ cambium convert contents/ installer.exe    # create sfx
 **Scenario:** Source code → HTML with highlighting.
 
 ```bash
-cambium convert main.rs main.html --highlight
+paraphase convert main.rs main.html --highlight
 ```
 
 **Type complexity:** Source language detection.
@@ -363,7 +363,7 @@ cambium convert main.rs main.html --highlight
 **Scenario:** Parse code, output AST as JSON.
 
 ```bash
-cambium convert main.rs ast.json --format tree-sitter
+paraphase convert main.rs ast.json --format tree-sitter
 ```
 
 **Type complexity:** Multiple output formats for AST.
@@ -378,7 +378,7 @@ cambium convert main.rs ast.json --format tree-sitter
 **Scenario:** Chain multiple conversions explicitly.
 
 ```bash
-cambium pipe input.md \
+paraphase pipe input.md \
   | markdown-to-html \
   | minify-html \
   | gzip \
@@ -392,7 +392,7 @@ cambium pipe input.md \
 **Scenario:** System finds path through graph.
 
 ```bash
-cambium convert input.md output.pdf
+paraphase convert input.md output.pdf
 # System determines: md → html → pdf
 ```
 
@@ -403,7 +403,7 @@ cambium convert input.md output.pdf
 **Scenario:** User constrains intermediate formats.
 
 ```bash
-cambium convert input.md output.pdf --via latex
+paraphase convert input.md output.pdf --via latex
 # Forces: md → latex → pdf
 ```
 
@@ -418,7 +418,7 @@ cambium convert input.md output.pdf --via latex
 **Scenario:** 3D model to printable instructions.
 
 ```bash
-cambium convert model.step model.gcode --printer ender3
+paraphase convert model.step model.gcode --printer ender3
 # Internally: STEP → STL → sliced GCODE
 ```
 
@@ -430,7 +430,7 @@ External config needed (printer profile).
 **Scenario:** PCB design to fabrication files.
 
 ```bash
-cambium convert board.kicad_pcb --to gerber-zip
+paraphase convert board.kicad_pcb --to gerber-zip
 # Outputs: multiple gerber layers + drill files + preview PNG
 ```
 
@@ -441,7 +441,7 @@ cambium convert board.kicad_pcb --to gerber-zip
 **Scenario:** Source font to web-ready formats.
 
 ```bash
-cambium convert font.glyphs font.woff2
+paraphase convert font.glyphs font.woff2
 # Internally: Glyphs → UFO → OTF → WOFF2
 ```
 
@@ -452,7 +452,7 @@ cambium convert font.glyphs font.woff2
 **Scenario:** SVG icons → icon font.
 
 ```bash
-cambium convert icons/*.svg icons.woff2 --as icon-font
+paraphase convert icons/*.svg icons.woff2 --as icon-font
 ```
 
 **Complexity:** Multiple inputs → single output. Semantic: these SVGs are glyphs.
@@ -462,7 +462,7 @@ cambium convert icons/*.svg icons.woff2 --as icon-font
 **Scenario:** Markdown to Kindle format.
 
 ```bash
-cambium convert book.md book.azw3
+paraphase convert book.md book.azw3
 # Internally: Markdown → EPUB → MOBI → AZW3
 ```
 
@@ -473,9 +473,9 @@ cambium convert book.md book.azw3
 **Scenario:** Text DSL to image.
 
 ```bash
-cambium convert diagram.mmd diagram.png   # mermaid
-cambium convert graph.dot graph.svg        # graphviz
-cambium convert sequence.puml sequence.png # plantuml
+paraphase convert diagram.mmd diagram.png   # mermaid
+paraphase convert graph.dot graph.svg        # graphviz
+paraphase convert sequence.puml sequence.png # plantuml
 ```
 
 **Complexity:** "Format" is text, but semantic interpretation produces graphics.
@@ -486,9 +486,9 @@ Converters need domain interpreters (mermaid-js, graphviz, plantuml).
 **Scenario:** Data → chart → image.
 
 ```bash
-cambium convert data.csv chart.png --spec vega-lite.json
+paraphase convert data.csv chart.png --spec vega-lite.json
 # Or: inlined
-cambium convert data.csv chart.png --chart bar --x date --y value
+paraphase convert data.csv chart.png --chart bar --x date --y value
 ```
 
 **Complexity:** Conversion requires specification/template. Data + spec → output.
@@ -498,7 +498,7 @@ cambium convert data.csv chart.png --chart bar --x date --y value
 **Scenario:** Translation spreadsheet → multiple platform formats.
 
 ```bash
-cambium convert translations.xlsx locales/ --formats android,ios,json
+paraphase convert translations.xlsx locales/ --formats android,ios,json
 # Outputs: locales/en.xml, locales/en.strings, locales/en.json, ...
 ```
 
@@ -509,9 +509,9 @@ cambium convert translations.xlsx locales/ --formats android,ios,json
 **Scenario:** Source code → compiled output.
 
 ```bash
-cambium convert main.ts main.js          # typescript
-cambium convert paper.tex paper.pdf       # latex
-cambium convert notebook.ipynb report.html --execute  # jupyter
+paraphase convert main.ts main.js          # typescript
+paraphase convert paper.tex paper.pdf       # latex
+paraphase convert notebook.ipynb report.html --execute  # jupyter
 ```
 
 **Complexity:** Is this conversion or build? Requires toolchain (tsc, pdflatex, jupyter).
@@ -522,7 +522,7 @@ Execution may have side effects, network access, nondeterminism.
 **Scenario:** MIDI → WAV requires external resource.
 
 ```bash
-cambium convert song.midi song.wav --soundfont piano.sf2
+paraphase convert song.midi song.wav --soundfont piano.sf2
 ```
 
 **Complexity:** Conversion requires auxiliary input (soundfont).
@@ -533,8 +533,8 @@ Not just file → file, but file + resource → file.
 **Scenario:** Data → visual encoding.
 
 ```bash
-cambium convert --from text "https://example.com" qr.png
-cambium convert --from isbn "978-3-16-148410-0" barcode.svg
+paraphase convert --from text "https://example.com" qr.png
+paraphase convert --from isbn "978-3-16-148410-0" barcode.svg
 ```
 
 **Complexity:** Input is data/string, not file. Type is semantic (URL, ISBN), not format.
@@ -544,8 +544,8 @@ cambium convert --from isbn "978-3-16-148410-0" barcode.svg
 **Scenario:** Round-trip with quality loss.
 
 ```bash
-cambium convert doc.pdf doc.docx   # best-effort extraction
-cambium convert doc.docx doc.pdf   # faithful rendering
+paraphase convert doc.pdf doc.docx   # best-effort extraction
+paraphase convert doc.docx doc.pdf   # faithful rendering
 ```
 
 **Complexity:** Same types, but converters have different fidelity.
@@ -556,8 +556,8 @@ Graph edges have quality/lossiness weights.
 **Scenario:** Excel → SQLite.
 
 ```bash
-cambium convert data.xlsx data.sqlite
-cambium convert data.sqlite data.xlsx
+paraphase convert data.xlsx data.sqlite
+paraphase convert data.sqlite data.xlsx
 ```
 
 **Complexity:** Cross-domain (document ↔ database). Schema inference.
@@ -567,10 +567,10 @@ cambium convert data.sqlite data.xlsx
 **Scenario:** Explode video/gif to frames, or assemble frames to video/gif.
 
 ```bash
-cambium convert animation.gif frames/      # gif → directory of PNGs
-cambium convert video.mp4 frames/ --fps 30 # video → frames at specific rate
-cambium convert frames/*.png animation.gif --fps 15  # frames → gif
-cambium convert frames/*.png video.mp4 --fps 60      # frames → video
+paraphase convert animation.gif frames/      # gif → directory of PNGs
+paraphase convert video.mp4 frames/ --fps 30 # video → frames at specific rate
+paraphase convert frames/*.png animation.gif --fps 15  # frames → gif
+paraphase convert frames/*.png video.mp4 --fps 60      # frames → video
 ```
 
 **Complexity:**
@@ -583,7 +583,7 @@ cambium convert frames/*.png video.mp4 --fps 60      # frames → video
 **Scenario:** Import a directory of mixed assets for a game engine, generating manifests.
 
 ```bash
-cambium import assets/ --target godot --output imported/
+paraphase import assets/ --target godot --output imported/
 # Input: assets/
 #   ├── player.png
 #   ├── enemy.blend
@@ -612,8 +612,8 @@ cambium import assets/ --target godot --output imported/
 **Scenario:** Pack sprites into sheet, or extract from sheet.
 
 ```bash
-cambium convert sprites/*.png spritesheet.png --pack --metadata sprites.json
-cambium convert spritesheet.png sprites/ --unpack --metadata sprites.json
+paraphase convert sprites/*.png spritesheet.png --pack --metadata sprites.json
+paraphase convert spritesheet.png sprites/ --unpack --metadata sprites.json
 ```
 
 **Complexity:**

@@ -781,123 +781,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cambium"
-version = "0.1.0"
-dependencies = [
- "indexmap",
- "rayon",
- "serde",
- "serde_json",
- "serde_yaml",
- "thiserror",
- "toml 0.8.23",
-]
-
-[[package]]
-name = "cambium-audio"
-version = "0.1.0"
-dependencies = [
- "cambium",
- "hound",
- "symphonia",
-]
-
-[[package]]
-name = "cambium-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "cambium",
- "cambium-audio",
- "cambium-image",
- "cambium-serde",
- "cambium-video",
- "clap",
- "clap_complete",
- "clap_mangen",
- "dirs",
- "glob",
- "image",
- "indexmap",
- "indicatif",
- "magic-db",
- "pure-magic",
- "rhizome-dew-core",
- "rhizome-dew-scalar",
- "serde",
- "toml 0.8.23",
- "walkdir",
-]
-
-[[package]]
-name = "cambium-image"
-version = "0.1.0"
-dependencies = [
- "cambium",
- "image",
- "indexmap",
-]
-
-[[package]]
-name = "cambium-plugin"
-version = "0.1.0"
-dependencies = [
- "cambium",
-]
-
-[[package]]
-name = "cambium-serde"
-version = "0.1.0"
-dependencies = [
- "apache-avro",
- "arrow",
- "base64",
- "bincode",
- "brotli 7.0.0",
- "bson",
- "bytes",
- "calamine",
- "cambium",
- "ciborium",
- "csv",
- "encoding_rs",
- "flate2",
- "flexbuffers",
- "hex",
- "html2text",
- "json5",
- "parquet",
- "plist",
- "postcard",
- "pulldown-cmark",
- "quick-xml",
- "rmp-serde",
- "ron",
- "rust-ini",
- "serde",
- "serde-lexpr",
- "serde-pickle",
- "serde_bencode",
- "serde_json",
- "serde_qs",
- "serde_urlencoded",
- "serde_yaml",
- "tar",
- "toml 0.9.11+spec-1.1.0",
- "zip 2.4.2",
- "zstd",
-]
-
-[[package]]
-name = "cambium-video"
-version = "0.1.0"
-dependencies = [
- "cambium",
- "ffmpeg-next",
- "indexmap",
-]
-
-[[package]]
 name = "cc"
 version = "1.2.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3013,6 +2896,123 @@ name = "rgb"
 version = "0.8.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c6a884d2998352bb4daf0183589aec883f16a6da1f4dde84d8e2e9a5409a1ce"
+
+[[package]]
+name = "rhi-paraphase-audio"
+version = "0.1.0"
+dependencies = [
+ "hound",
+ "rhi-paraphase-core",
+ "symphonia",
+]
+
+[[package]]
+name = "rhi-paraphase-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "clap_complete",
+ "clap_mangen",
+ "dirs",
+ "glob",
+ "image",
+ "indexmap",
+ "indicatif",
+ "magic-db",
+ "pure-magic",
+ "rhi-paraphase-audio",
+ "rhi-paraphase-core",
+ "rhi-paraphase-image",
+ "rhi-paraphase-serde",
+ "rhi-paraphase-video",
+ "rhizome-dew-core",
+ "rhizome-dew-scalar",
+ "serde",
+ "toml 0.8.23",
+ "walkdir",
+]
+
+[[package]]
+name = "rhi-paraphase-core"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "rayon",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "rhi-paraphase-image"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "indexmap",
+ "rhi-paraphase-core",
+]
+
+[[package]]
+name = "rhi-paraphase-plugin"
+version = "0.1.0"
+dependencies = [
+ "rhi-paraphase-core",
+]
+
+[[package]]
+name = "rhi-paraphase-serde"
+version = "0.1.0"
+dependencies = [
+ "apache-avro",
+ "arrow",
+ "base64",
+ "bincode",
+ "brotli 7.0.0",
+ "bson",
+ "bytes",
+ "calamine",
+ "ciborium",
+ "csv",
+ "encoding_rs",
+ "flate2",
+ "flexbuffers",
+ "hex",
+ "html2text",
+ "json5",
+ "parquet",
+ "plist",
+ "postcard",
+ "pulldown-cmark",
+ "quick-xml",
+ "rhi-paraphase-core",
+ "rmp-serde",
+ "ron",
+ "rust-ini",
+ "serde",
+ "serde-lexpr",
+ "serde-pickle",
+ "serde_bencode",
+ "serde_json",
+ "serde_qs",
+ "serde_urlencoded",
+ "serde_yaml",
+ "tar",
+ "toml 0.9.11+spec-1.1.0",
+ "zip 2.4.2",
+ "zstd",
+]
+
+[[package]]
+name = "rhi-paraphase-video"
+version = "0.1.0"
+dependencies = [
+ "ffmpeg-next",
+ "indexmap",
+ "rhi-paraphase-core",
+]
 
 [[package]]
 name = "rhizome-dew-cond"

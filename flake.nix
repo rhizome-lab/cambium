@@ -1,5 +1,5 @@
 {
-  description = "cambium - a build tool for data formats";
+  description = "paraphase - a build tool for data formats";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -23,7 +23,7 @@
       in
       {
         packages.default = pkgs.rustPlatform.buildRustPackage {
-          pname = "cambium";
+          pname = "paraphase";
           version = "0.1.0";
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;

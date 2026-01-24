@@ -1,6 +1,6 @@
 # Open Questions
 
-Unresolved design decisions for Cambium.
+Unresolved design decisions for Paraphrase.
 
 ## Resolved
 
@@ -14,10 +14,10 @@ Unresolved design decisions for Cambium.
 - **Sidecars/manifests**: Just N→M conversions, no special case
 - **Workflow format**: Format-agnostic (YAML, TOML, JSON, etc.)
 - **Property naming**: Flat by default, namespace when semantics differ
-- **Plugin versioning**: Semver ranges (plugin declares compatible cambium versions)
-- **Cache location**: Local by default (`.cambium/cache/`), global fallback (`~/.cache/cambium/`), configurable
+- **Plugin versioning**: Semver ranges (plugin declares compatible paraphase versions)
+- **Cache location**: Local by default (`.paraphase/cache/`), global fallback (`~/.cache/paraphase/`), configurable
 - **Cache granularity**: Content-addressed with file-level dependency tracking
-- **Caching implementation**: Plugin crate (`cambium-cache`), not baked into core
+- **Caching implementation**: Plugin crate (`paraphase-cache`), not baked into core
 - **Batch boundaries**: Soft-explicit based on invocation (CLI args = batch, tree = batch, recursive = batch per dir)
 - **Converter model**: Named ports with per-port cardinality (`list: bool`), inspired by ComfyUI
 - **Planning cardinality**: Inferred from source/target, tracked through graph
@@ -39,14 +39,14 @@ struct ConverterDecl {
 ```
 
 ```bash
-cambium convert a.png b.webp --optimize quality              # minimize quality_loss
-cambium convert a.png b.webp --optimize speed                # minimize speed cost
-cambium convert a.png b.webp --cost "0.7*quality_loss + 0.3*speed"  # weighted
+paraphase convert a.png b.webp --optimize quality              # minimize quality_loss
+paraphase convert a.png b.webp --optimize speed                # minimize speed cost
+paraphase convert a.png b.webp --cost "0.7*quality_loss + 0.3*speed"  # weighted
 ```
 
 **Open:** Expression syntax. Should be consistent across the rhizome ecosystem.
 
-**Ecosystem decision:** Use [Dew](https://github.com/rhizome-lab/dew) - minimal expression language for procedural generation.
+**Ecosystem decision:** Use [Dew](https://github.com/rhi-zone/dew) - minimal expression language for procedural generation.
 
 ```
 dew-core       # Syntax only: AST, parsing
@@ -61,7 +61,7 @@ dew-core       # Syntax only: AST, parsing
     +-- dew-quaternion # Quaternions
 ```
 
-Cambium likely just needs `dew-core` + `dew-scalar` for cost expressions. Each domain crate has self-contained backends (wgsl, lua, cranelift) as features.
+Paraphrase likely just needs `dew-core` + `dew-scalar` for cost expressions. Each domain crate has self-contained backends (wgsl, lua, cranelift) as features.
 
 ### Property naming: what needs namespacing?
 
@@ -100,12 +100,12 @@ Open:
 
 **Decision:** Semver ranges.
 
-Plugins declare compatible cambium API versions (e.g., `^1.0`). Cambium checks compatibility at load time. Breaking API changes bump major version.
+Plugins declare compatible paraphase API versions (e.g., `^1.0`). Paraphrase checks compatibility at load time. Breaking API changes bump major version.
 
 ```c
 // Plugin exports
-uint32_t cambium_plugin_api_version(void);  // e.g., returns 0x010000 for 1.0.0
-const char* cambium_plugin_api_compat(void); // e.g., returns "^1.0"
+uint32_t paraphase_plugin_api_version(void);  // e.g., returns 0x010000 for 1.0.0
+const char* paraphase_plugin_api_compat(void); // e.g., returns "^1.0"
 ```
 
 Open:
@@ -124,8 +124,8 @@ Can plugins depend on other plugins?
 
 **Decisions:**
 - **Granularity:** Content-addressed with file-level dependency tracking
-- **Location:** Local by default (`.cambium/cache/`), global fallback (`~/.cache/cambium/`), configurable
-- **Implementation:** Plugin crate (`cambium-cache`), not baked into core
+- **Location:** Local by default (`.paraphase/cache/`), global fallback (`~/.cache/paraphase/`), configurable
+- **Implementation:** Plugin crate (`paraphase-cache`), not baked into core
 
 **How they compose:**
 1. File-level tracking detects "has input changed?" (fast mtime/hash check)
@@ -147,29 +147,29 @@ Open:
 
 ```bash
 # Option A: subcommands
-cambium convert input.md output.html
-cambium pipe input.md | step1 | step2 > output.html
-cambium watch src/ --to dist/
+paraphase convert input.md output.html
+paraphase pipe input.md | step1 | step2 > output.html
+paraphase watch src/ --to dist/
 
 # Option B: implicit
-cambium input.md output.html  # infers "convert"
-cambium input.md --to html    # output to stdout or inferred name
+paraphase input.md output.html  # infers "convert"
+paraphase input.md --to html    # output to stdout or inferred name
 
 # Option C: make-like
-cambium build  # reads cambium.toml, builds all targets
+paraphase build  # reads paraphase.toml, builds all targets
 ```
 
 ### How explicit should type annotation be?
 
 ```bash
 # Fully inferred
-cambium convert data output.yaml
+paraphase convert data output.yaml
 
 # Explicit source type
-cambium convert --from json data output.yaml
+paraphase convert --from json data output.yaml
 
 # Explicit both
-cambium convert --from json --to yaml data output
+paraphase convert --from json --to yaml data output
 ```
 
 ## Integration with Resin/Rhizome
@@ -178,13 +178,13 @@ cambium convert --from json --to yaml data output
 
 ### Shared types with Resin?
 
-Do Cambium's `Image`, `Mesh`, etc. share definitions with Resin?
-Or is Cambium format-agnostic and Resin provides domain IRs?
+Do Paraphrase's `Image`, `Mesh`, etc. share definitions with Resin?
+Or is Paraphrase format-agnostic and Resin provides domain IRs?
 
 Options:
-1. **Cambium is format-only** - knows `png`, `obj`, not `Image`, `Mesh`
+1. **Paraphrase is format-only** - knows `png`, `obj`, not `Image`, `Mesh`
 2. **Shared IR crate** - `rhizome-types` used by both
-3. **Cambium defines IRs** - Resin depends on cambium's `Image` type
+3. **Paraphrase defines IRs** - Resin depends on paraphase's `Image` type
 
 ## Converter Model (N→M Conversions)
 

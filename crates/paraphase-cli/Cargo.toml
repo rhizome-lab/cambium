@@ -1,0 +1,60 @@
+[package]
+name = "rhi-paraphase-cli"
+description = "CLI for Paraphase data transformation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "paraphase"
+path = "src/main.rs"
+
+[features]
+default = ["serde", "image"]
+
+# Converter backends
+serde = ["dep:rhi-paraphase-serde"]
+image = ["dep:rhi-paraphase-image", "dep:image"]
+video = ["dep:rhi-paraphase-video"]
+audio = ["dep:rhi-paraphase-audio"]
+
+# Enable all formats in each backend
+serde-all = ["serde", "rhi-paraphase-serde/all"]
+image-all = ["image", "rhi-paraphase-image/all"]
+video-all = ["video", "rhi-paraphase-video/all"]
+audio-all = ["audio", "rhi-paraphase-audio/all"]
+
+# Parallel execution (batch processing)
+parallel = ["rhi-paraphase-core/parallel"]
+
+# Dynamic expressions in presets (via Dew)
+dew = ["dep:rhizome-dew-core", "dep:rhizome-dew-scalar"]
+
+# Everything (video excluded from default, requires FFmpeg)
+all = ["serde-all", "image-all", "video-all", "audio-all", "parallel", "dew"]
+
+[dependencies]
+rhi-paraphase-core.workspace = true
+rhi-paraphase-serde = { workspace = true, optional = true }
+rhi-paraphase-image = { workspace = true, optional = true }
+rhi-paraphase-video = { workspace = true, optional = true }
+rhi-paraphase-audio = { workspace = true, optional = true }
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+clap_mangen = "0.2"
+indicatif = "0.17"
+pure-magic = "0.1"
+magic-db = "0.3"
+anyhow = "1"
+indexmap = "2"
+image = { version = "0.25", default-features = false, optional = true }
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+dirs = "6"
+glob = "0.3"
+walkdir = "2"
+
+# Dew expression language (optional) - still using rhizome- prefix until dew is renamed
+rhizome-dew-core = { path = "../../../dew/crates/dew-core", features = ["cond", "func"], optional = true }
+rhizome-dew-scalar = { path = "../../../dew/crates/dew-scalar", optional = true }

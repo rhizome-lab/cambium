@@ -1,8 +1,8 @@
 # Formats Reference
 
-Complete list of formats supported by Cambium converters.
+Complete list of formats supported by Paraphrase converters.
 
-## Serde Formats (cambium-serde)
+## Serde Formats (paraphase-serde)
 
 All serde formats use `serde_json::Value` as an intermediate representation, enabling conversion between any pair of enabled formats.
 
@@ -37,7 +37,7 @@ All serde formats use `serde_json::Value` as an intermediate representation, ena
 ### Feature Groups
 
 ```toml
-# Cargo.toml for cambium-serde
+# Cargo.toml for paraphase-serde
 [features]
 default = ["json", "yaml", "toml"]
 all = ["json", "yaml", "toml", "ron", "json5", "xml", "lexpr",
@@ -45,7 +45,7 @@ all = ["json", "yaml", "toml", "ron", "json5", "xml", "lexpr",
        "bson", "flexbuffers", "bencode", "pickle", "plist"]
 ```
 
-## Image Formats (cambium-image)
+## Image Formats (paraphase-image)
 
 All image formats use `image::DynamicImage` as an intermediate representation.
 
@@ -81,7 +81,7 @@ All image formats use `image::DynamicImage` as an intermediate representation.
 ### Feature Groups
 
 ```toml
-# Cargo.toml for cambium-image
+# Cargo.toml for paraphase-image
 [features]
 default = ["png", "jpeg", "webp", "gif"]
 all = ["png", "jpeg", "webp", "gif", "bmp", "ico", "tiff", "tga",
@@ -90,7 +90,7 @@ all = ["png", "jpeg", "webp", "gif", "bmp", "ico", "tiff", "tga",
 
 ### Image Transforms
 
-Beyond format conversion, cambium-image provides transform operations:
+Beyond format conversion, paraphase-image provides transform operations:
 
 | Converter | Description | Options |
 |-----------|-------------|---------|
@@ -122,22 +122,22 @@ Beyond format conversion, cambium-image provides transform operations:
 
 ```bash
 # Resize to fit within 1024px width
-cambium convert photo.png photo.webp --max-width 1024
+paraphase convert photo.png photo.webp --max-width 1024
 
 # Scale to 50%
-cambium convert photo.png thumb.png --scale 0.5
+paraphase convert photo.png thumb.png --scale 0.5
 
 # Crop to 16:9, keeping top of image
-cambium convert photo.png banner.png --aspect 16:9 --gravity top
+paraphase convert photo.png banner.png --aspect 16:9 --gravity top
 
 # Combine: crop to square, resize, convert format
-cambium convert photo.png avatar.webp --aspect 1:1 --max-width 200
+paraphase convert photo.png avatar.webp --aspect 1:1 --max-width 200
 
 # Add watermark
-cambium convert photo.png branded.png --watermark logo.png
+paraphase convert photo.png branded.png --watermark logo.png
 
 # Watermark with options
-cambium convert photo.png branded.png --watermark logo.png \
+paraphase convert photo.png branded.png --watermark logo.png \
   --watermark-position bottom-right --watermark-opacity 0.5 --watermark-margin 20
 ```
 
@@ -147,7 +147,7 @@ cambium convert photo.png branded.png --watermark logo.png \
 - `opacity`: Watermark transparency (0.0-1.0, default 1.0)
 - `margin`: Pixels from edge (default 0)
 
-## Audio Formats (cambium-audio)
+## Audio Formats (paraphase-audio)
 
 Pure Rust audio processing via Symphonia (decode) and Hound (WAV encode).
 
@@ -166,7 +166,7 @@ Pure Rust audio processing via Symphonia (decode) and Hound (WAV encode).
 ### Feature Groups
 
 ```toml
-# Cargo.toml for cambium-audio
+# Cargo.toml for paraphase-audio
 [features]
 default = ["wav", "flac", "mp3", "ogg"]
 all = ["wav", "flac", "mp3", "ogg", "aac"]
@@ -176,16 +176,16 @@ all = ["wav", "flac", "mp3", "ogg", "aac"]
 
 ```bash
 # Convert MP3 to WAV
-cambium convert song.mp3 song.wav
+paraphase convert song.mp3 song.wav
 
 # Convert FLAC to WAV
-cambium convert album.flac album.wav
+paraphase convert album.flac album.wav
 
 # Convert OGG to WAV
-cambium convert audio.ogg audio.wav
+paraphase convert audio.ogg audio.wav
 ```
 
-## Video Formats (cambium-video)
+## Video Formats (paraphase-video)
 
 All video formats use FFmpeg as the transcoding backend. **Requires FFmpeg installed at runtime.**
 
@@ -203,7 +203,7 @@ All video formats use FFmpeg as the transcoding backend. **Requires FFmpeg insta
 ### Feature Groups
 
 ```toml
-# Cargo.toml for cambium-video
+# Cargo.toml for paraphase-video
 [features]
 default = ["mp4", "webm", "gif"]
 all = ["mp4", "webm", "mkv", "avi", "mov", "gif", "audio"]
@@ -228,16 +228,16 @@ all = ["mp4", "webm", "mkv", "avi", "mov", "gif", "audio"]
 
 ```bash
 # Convert MP4 to WebM
-cambium convert video.mp4 video.webm
+paraphase convert video.mp4 video.webm
 
 # Convert with quality preset
-cambium convert video.mp4 video.webm --quality high
+paraphase convert video.mp4 video.webm --quality high
 
 # Resize video
-cambium convert video.mp4 small.mp4 --max-width 720
+paraphase convert video.mp4 small.mp4 --max-width 720
 
 # GIF to video
-cambium convert animation.gif video.mp4
+paraphase convert animation.gif video.mp4
 ```
 
 ## CLI Feature Flags
@@ -245,21 +245,21 @@ cambium convert animation.gif video.mp4
 The CLI combines all converter backends:
 
 ```toml
-# Cargo.toml for cambium-cli
+# Cargo.toml for paraphase-cli
 [features]
 default = ["serde", "image"]
 
 # Include backends
-serde = ["dep:cambium-serde"]
-image = ["dep:cambium-image"]
-video = ["dep:cambium-video"]  # Requires FFmpeg
-audio = ["dep:cambium-audio"]
+serde = ["dep:paraphase-serde"]
+image = ["dep:paraphase-image"]
+video = ["dep:paraphase-video"]  # Requires FFmpeg
+audio = ["dep:paraphase-audio"]
 
 # Enable all formats per backend
-serde-all = ["serde", "cambium-serde/all"]
-image-all = ["image", "cambium-image/all"]
-video-all = ["video", "cambium-video/all"]
-audio-all = ["audio", "cambium-audio/all"]
+serde-all = ["serde", "paraphase-serde/all"]
+image-all = ["image", "paraphase-image/all"]
+video-all = ["video", "paraphase-video/all"]
+audio-all = ["audio", "paraphase-audio/all"]
 
 # Everything (video excluded from default, requires FFmpeg)
 all = ["serde-all", "image-all", "video-all", "audio-all"]
@@ -269,20 +269,20 @@ all = ["serde-all", "image-all", "video-all", "audio-all"]
 
 ```bash
 # Default: common serde + common image formats
-cargo install cambium-cli
+cargo install paraphase-cli
 
 # All formats
-cargo install cambium-cli --features all
+cargo install paraphase-cli --features all
 
 # Only serde formats (no image support)
-cargo install cambium-cli --no-default-features --features serde-all
+cargo install paraphase-cli --no-default-features --features serde-all
 
 # Only image formats (no serde support)
-cargo install cambium-cli --no-default-features --features image-all
+cargo install paraphase-cli --no-default-features --features image-all
 
 # Specific formats only
-cargo install cambium-cli --no-default-features \
-  --features cambium-serde/json,cambium-serde/yaml,cambium-image/png
+cargo install paraphase-cli --no-default-features \
+  --features paraphase-serde/json,paraphase-serde/yaml,paraphase-image/png
 ```
 
 ## Converter Naming
@@ -297,7 +297,7 @@ Converters follow the pattern `{crate}.{from}-to-{to}`:
 List all available converters:
 
 ```bash
-cambium list
+paraphase list
 ```
 
 ## Adding Custom Converters
@@ -305,7 +305,7 @@ cambium list
 Implement the `Converter` trait:
 
 ```rust
-use cambium::{Converter, ConverterDecl, ConvertError, ConvertOutput, Properties, PropertyPattern};
+use paraphase::{Converter, ConverterDecl, ConvertError, ConvertOutput, Properties, PropertyPattern};
 
 pub struct MyConverter {
     decl: ConverterDecl,

@@ -122,7 +122,7 @@ Available variables (from input file properties):
 - `file_size` - input file size in bytes
 - Any other numeric property from the input
 
-Expressions use [Dew](https://github.com/rhizome-lab/dew) syntax with standard math functions:
+Expressions use [Dew](https://github.com/rhi-zone/dew) syntax with standard math functions:
 - Comparison: `<`, `>`, `<=`, `>=`, `==`, `!=`
 - Math: `min`, `max`, `clamp`, `abs`, `sqrt`, `pow`
 - Conditionals: `if ... then ... else ...`

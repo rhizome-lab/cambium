@@ -6,16 +6,16 @@ members = ["crates/*"]
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/rhizome-labs/cambium"
+repository = "https://github.com/rhi-zone/paraphase"
 
 [workspace.dependencies]
 # Internal
-cambium = { path = "crates/cambium" }
-cambium-plugin = { path = "crates/cambium-plugin" }
-cambium-serde = { path = "crates/cambium-serde" }
-cambium-image = { path = "crates/cambium-image" }
-cambium-video = { path = "crates/cambium-video" }
-cambium-audio = { path = "crates/cambium-audio" }
+rhi-paraphase-core = { path = "crates/paraphase-core" }
+rhi-paraphase-plugin = { path = "crates/paraphase-plugin" }
+rhi-paraphase-serde = { path = "crates/paraphase-serde" }
+rhi-paraphase-image = { path = "crates/paraphase-image" }
+rhi-paraphase-video = { path = "crates/paraphase-video" }
+rhi-paraphase-audio = { path = "crates/paraphase-audio" }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

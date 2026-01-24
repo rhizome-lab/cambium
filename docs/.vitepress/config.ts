@@ -8,10 +8,10 @@ export default withMermaid(
         include: ['mermaid'],
       },
     },
-    title: 'Cambium',
+    title: 'Paraphrase',
     description: 'Pipeline orchestrator for data conversion',
 
-    base: '/cambium/',
+    base: '/paraphase/',
 
     themeConfig: {
       nav: [
@@ -36,7 +36,7 @@ export default withMermaid(
       },
 
       socialLinks: [
-        { icon: 'github', link: 'https://github.com/rhizome-lab/cambium' }
+        { icon: 'github', link: 'https://github.com/rhizome-lab/paraphase' }
       ],
 
       search: {
@@ -44,7 +44,7 @@ export default withMermaid(
       },
 
       editLink: {
-        pattern: 'https://github.com/rhizome-lab/cambium/edit/master/docs/:path',
+        pattern: 'https://github.com/rhizome-lab/paraphase/edit/master/docs/:path',
         text: 'Edit this page on GitHub'
       },
     },

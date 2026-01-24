@@ -1,0 +1,20 @@
+[package]
+name = "rhi-paraphase-core"
+description = "Type-driven data transformation pipeline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+parallel = ["rayon"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+indexmap.workspace = true
+toml = "0.8"
+serde_yaml = "0.9"
+rayon = { version = "1.10", optional = true }
